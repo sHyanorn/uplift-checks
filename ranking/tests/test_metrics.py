@@ -264,3 +264,18 @@ def test_tie_shares():
     w = np.array([1, 1, 0, 0, 1, 1, 1])
     assert m.ties(score, w) == (5 / 7, 3 / 5)
     assert m.ties(np.arange(4.0), w[:4]) == (0.0, 0.0)
+
+
+@pytest.mark.parametrize("levels", [2, 9, None])
+def test_budget_value_follows_the_definition(levels):
+    t, score = sample(300, 4, levels)
+    gamma = m.aipw(t.w, t.y, t.mu0, t.mu1)
+    for k in (0.1, 0.3, 0.5):
+        cut, taken, total = k * 300, 0, 0.0
+        for b in slow_blocks(score):
+            part = min(len(b), cut - taken)
+            if part <= 0:
+                break
+            total += part / len(b) * sum(gamma[i] for i in b)
+            taken += part
+        assert m.budget_value(score, gamma, k) == pytest.approx(total / 300, abs=1e-12)

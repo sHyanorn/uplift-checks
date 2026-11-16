@@ -132,6 +132,13 @@ def rate_autoc(score, gamma):
     return float(np.mean(toc(score, gamma)))
 
 
+def budget_value(score, gamma, k):
+    """H5: (1/n) sum of gamma over the top k n rows by score, a tie block at the cut in proportion."""
+    order, ends = tie_blocks(score)
+    cut = np.interp(k * len(score), np.r_[0, ends + 1], np.r_[0.0, np.cumsum(gamma[order])[ends]])
+    return float(cut / len(score))
+
+
 def own_versions(score, w, y, gamma, perm):
     return {
         "V2*": qini_scaled(score, w, y),

@@ -38,4 +38,7 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["ignore:Function stable_cumsum is deprecated:FutureWarning"]
+filterwarnings = [
+    "ignore:Function stable_cumsum is deprecated:FutureWarning",
+    "ignore:This process .* is multi-threaded, use of fork:DeprecationWarning",
+]

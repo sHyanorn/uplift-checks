@@ -1,0 +1,41 @@
+[project]
+name = "uplift-ranking"
+version = "0.1.0"
+description = "Rankings, intervals and power of uplift model comparisons on three randomised trials"
+license = "MIT"
+requires-python = "==3.13.*"
+dependencies = [
+    "numpy==2.5.4",
+    "pandas==3.1.1",
+    "scipy==1.18.1",
+    "scikit-learn==1.9.1",
+    "lightgbm==4.7.0",
+    "torch==2.15.0",
+    "econml==0.17.0",
+    "highspy==1.16.0",
+    "pyarrow==26.0.1",
+    "causalml==0.18.0",
+    "scikit-uplift==0.5.1",
+]
+
+[dependency-groups]
+test = ["pytest==9.2.0"]
+
+[build-system]
+requires = ["uv_build==0.11.32"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv]
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:Function stable_cumsum is deprecated:FutureWarning"]

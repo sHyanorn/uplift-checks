@@ -19,14 +19,17 @@ class Trial:
         return self.mu1 - self.mu0
 
 
-def rct(n, seed, d=6, treated=0.5, base=-1.0):
-    """Randomised trial: the outcome depends on x0 and x1, the effect on x2 (and its sign on x3)."""
+def rct(n, seed, d=6, treated=0.5, base=-1.0, selective=0.0):
+    """Randomised trial: the outcome depends on x0 and x1, the effect on x2 (and its sign on x3).
+
+    With `selective`, the treatment log-odds also rise by selective * x1 (treatment depends on x)."""
     rng = np.random.default_rng(seed)
     x = rng.normal(size=(n, d)).astype(np.float32)
     mu0 = expit(base + 0.8 * x[:, 0] - 0.5 * x[:, 1])
     tau = 0.25 * expit(2.0 * x[:, 2]) - 0.05 * (x[:, 3] > 1.5)
     mu1 = np.clip(mu0 + tau, 0.0, 1.0)
-    w = (rng.random(n) < treated).astype(np.int64)
+    e = expit(np.log(treated / (1 - treated)) + selective * x[:, 1]) if selective else treated
+    w = (rng.random(n) < e).astype(np.int64)
     y = (rng.random(n) < np.where(w == 1, mu1, mu0)).astype(np.int64)
     return Trial(x, w, y, mu0, mu1)
 

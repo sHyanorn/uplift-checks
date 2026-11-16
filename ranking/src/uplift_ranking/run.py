@@ -1,0 +1,411 @@
+"""Run stages (Sections 10 and 11): search, select, the final block and the single test read.
+
+    python -m uplift_ranking.run search DATASET [--model NAME]
+    python -m uplift_ranking.run block DATASET
+    python -m uplift_ranking.run read DATASET prepare|go
+
+Records, manifests and results are written under ranking/ and committed by the operator; model
+files stay in the cache directory. Test rows are opened only inside `read ... go`.
+
+Every stage checks the package versions first: nothing is downloaded, written or fitted, and no test
+row is read, under other versions. Stop conditions of Section 10 raise Stop: a package version other
+than the registered ones, a missing or non-finite prediction of a frozen model, a cache directory
+above 25 GB, and in the block trial records that are not HEAD's or not on the remote's main branch.
+"""
+
+import argparse
+import datetime
+import hashlib
+import json
+import pickle
+import resource
+import secrets
+import subprocess
+from pathlib import Path
+
+import numpy as np
+
+from . import data, deep, forest, learners, results, tuning, versions
+from .learners import Split
+from .roles import groups
+
+ROOT = Path(__file__).resolve().parents[2]
+REGISTRATION = ROOT / "PREREGISTRATION.md"
+REGISTRATION_SHA256 = "e223e6ca8688b3caec522d1911c3f0d8b2a9e50c47cde675be0f27e89838b6b1"
+UNITS = {"criteo": {1: "visit", 2: "conversion"}, "lazada": {3: "label"}, "hillstrom": {4: "visit"}}
+NON_DEEP = tuning.MODELS[:6]
+DISK_LIMIT = 25e9
+TOKEN = "read token"
+
+
+class Stop(RuntimeError):
+    """A stop condition of Section 10, reported and resolved by an amendment before the read."""
+
+
+class Repository:
+    """The git checks of the entry point."""
+
+    def __init__(self, root=ROOT):
+        self.root = root
+
+    def git(self, *args, check=True):
+        return subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True, check=check)
+
+    def head(self):
+        return self.git("rev-parse", "HEAD").stdout.strip()
+
+    def added(self, path):
+        """The earliest commit in HEAD's history that added the file, or '' if none did."""
+        commits = self.git("log", "--diff-filter=A", "--format=%H", "--", str(Path(path).resolve())).stdout.split()
+        return commits[-1] if commits else ""
+
+    def blob(self, commit, path):
+        """The file's bytes at the commit, or None if it is not there."""
+        out = subprocess.run(["git", "show", f"{commit}:{self.name(path)}"], cwd=self.root, capture_output=True)
+        return out.stdout if out.returncode == 0 else None
+
+    def name(self, path):
+        """The path as git names it, from the top of the repository."""
+        return Path(path).resolve().relative_to(self.root.resolve().parent).as_posix()
+
+    def is_ancestor(self, a, b):
+        return self.git("merge-base", "--is-ancestor", a, b, check=False).returncode == 0
+
+    def clean(self):
+        return self.git("status", "--porcelain").stdout == ""
+
+    def committed(self, path):
+        """The file's content at HEAD, or '' if it is not there."""
+        out = self.git("show", f"HEAD:{self.name(path)}", check=False)
+        return out.stdout if out.returncode == 0 else ""
+
+    def contains(self, commit):
+        return self.is_ancestor(commit, "HEAD")
+
+    def pushed(self):
+        return self.is_ancestor("HEAD", "origin/main")
+
+
+def two_arms(split, unit):
+    """U4 takes either e-mail as treated; other units are already two-armed."""
+    return Split(split.x, (split.w > 0).astype(np.int64), split.y) if unit == 4 else split
+
+
+def search(dataset, records=tuning.RECORDS, commit="", models=tuning.MODELS):
+    """Seed-0 trials without a record; stops if m-hat and e differ from the unit's first record."""
+    versions.check()
+    d = data.load(dataset)
+    for unit, outcome in UNITS[dataset].items():
+        train, valid = two_arms(d.train[outcome], unit), two_arms(d.valid[outcome], unit)
+        _, m, e = learners.nuisances(train, valid, cross_fitted_e=dataset == "lazada")
+        tuning.check_fingerprint(tuning.read(records), unit, tuning.fingerprint(m, e))
+        for model in models:
+            for index in tuning.pending(tuning.read(records), unit, model):
+                tuning.append(tuning.trial(dataset, unit, model, index, train, valid, m, e, commit), records)
+
+
+def select(dataset, records=tuning.RECORDS):
+    rows = tuning.read(records)
+    chosen = {unit: {model: tuning.select(rows, unit, model) for model in tuning.MODELS} for unit in UNITS[dataset]}
+    disagreements = [r for unit in UNITS[dataset] for model in tuning.MODELS for r in tuning.disagreements(rows, unit, model)]
+    return chosen, disagreements
+
+
+def choose(dataset, repo, records=tuning.RECORDS):
+    """Selection from committed records only (Sections 4 and 11): the records file must be HEAD's, and
+    HEAD on the remote's main branch; HEAD is then the records commit of the frozen set.
+
+    Once the dataset has a committed read entry, the block reruns with the configurations, R* and records
+    commit of the committed manifest (Section 11), so that refits that reproduce the frozen files reproduce
+    the manifest hash."""
+    records = Path(records)
+    if entries(repo.committed(records.parent / "reads.jsonl"), dataset):
+        manifest = json.loads(repo.committed(records.parent / f"{dataset}-manifest.json"))
+        return {"configs": {int(u): c for u, c in manifest["configs"].items()}, "records commit": manifest["records commit"],
+                "R*": {int(u): r for u, r in manifest["R*"].items()}}, []
+    if not records.exists() or records.read_text() != repo.committed(records):
+        raise Stop("the trial records differ from HEAD's; commit and push them before the block")
+    if not repo.pushed():
+        raise Stop("HEAD is not on the main branch of the remote")
+    configs, disagreements = select(dataset, records)
+    return {"configs": configs, "records commit": repo.head()}, disagreements
+
+
+def frozen_bytes(model, config, fitted):
+    """A model file's bytes: pickles of LightGBM and forest objects, and of a deep model's weights as arrays."""
+    if model in tuning.DEEP:
+        state = {k: v.numpy() for k, v in fitted.module.state_dict().items()}
+        fitted = {"model": model, "config": config, "state": state, "mean": fitted.mean, "sd": fitted.sd,
+                  "epochs": fitted.epochs, "losses": fitted.losses}
+    return pickle.dumps(fitted, protocol=5)
+
+
+def thaw(raw):
+    obj = pickle.loads(raw)
+    if isinstance(obj, dict) and obj.get("model") in tuning.DEEP:
+        module = deep.MODELS[obj["model"]](len(obj["mean"]), obj["config"]["rank"])
+        module.load_state_dict({k: deep.torch.from_numpy(v) for k, v in obj["state"].items()})
+        return deep.Fitted(module, obj["mean"], obj["sd"], obj["epochs"], obj["losses"])
+    return obj
+
+
+def effect(model, fitted, x):
+    return forest.effect(fitted, x) if model == "causal forest" else fitted.effect(x)
+
+
+def finite(name, values, rows):
+    """`values` if it holds one finite prediction per row; Stop otherwise."""
+    values = np.asarray(values, dtype=float)
+    if values.shape != (rows,) or not np.all(np.isfinite(values)):
+        raise Stop(f"{name}: missing or non-finite predictions")
+    return values
+
+
+def outcome_predictions(unit, outcome_models, x, where):
+    return {name: finite(f"unit {unit} outcome model {name} on {where} rows", b.predict(x), len(x))
+            for name, b in outcome_models.items()}
+
+
+def predictions(unit, fits, outcome_models, x, where):
+    """Scores of every model at seeds 0 to 4 and the outcome models' predictions on the rows `x`."""
+    scores = {model: [finite(f"unit {unit} {model} seed {s} on {where} rows", effect(model, f, x), len(x))
+                      for s, f in enumerate(fits[model])] for model in tuning.MODELS}
+    return scores, outcome_predictions(unit, outcome_models, x, where)
+
+
+def check_nuisances(unit, m, e):
+    for name, values in (("m-hat", m), ("e", e)):
+        finite(f"unit {unit} {name} on validation rows", values, len(m))
+
+
+def resources(frozen):
+    """Peak resident memory of this process and of its largest child, and the size of the dataset's cache directory."""
+    peak = {who: resource.getrusage(r).ru_maxrss * 1024 / 1e9
+            for who, r in (("process", resource.RUSAGE_SELF), ("largest child", resource.RUSAGE_CHILDREN))}
+    disk = sum(f.stat().st_size for f in Path(frozen).parent.rglob("*") if f.is_file())
+    return {"peak memory GB": {k: round(v, 3) for k, v in peak.items()}, "cache GB": round(disk / 1e9, 3)}
+
+
+def block(dataset, chosen, records=tuning.RECORDS, frozen=None, out=ROOT / "results", replicates=None):
+    """Outcome models, m-hat and e, final fits at seeds 0 to 4, freeze, and the dry run on validation rows.
+
+    Every final fit's validation predictions are checked as soon as it is fitted. When `chosen` carries R*
+    (a rerun after the read entry), R* is not recomputed and the committed dry run is kept: only the fits rerun."""
+    installed = versions.check()
+    d = data.load(dataset)
+    frozen = frozen or data.CACHE / dataset / "frozen"
+    frozen.mkdir(parents=True, exist_ok=True)
+    manifest = {"dataset": dataset, "records commit": chosen["records commit"], "configs": {}, "R*": {}, "files": {},
+                "comparisons": {}}
+    if dataset == "criteo":
+        manifest["forest rows"] = hashlib.sha256(forest.criteo_rows().tobytes()).hexdigest()
+    rows = tuning.read(records)
+    dry = {}
+    for unit, outcome in UNITS[dataset].items():
+        train, valid = two_arms(d.train[outcome], unit), two_arms(d.valid[outcome], unit)
+        # 5.3: on U4 mu1 pools both e-mail arms; H6 adds arm1 and arm2 and shares mu0.
+        arms = {"mu0": [0], "mu1": [1, 2]} | ({"arm1": [1], "arm2": [2]} if unit == 4 else {})
+        outcome_models = learners.outcome_models(d.train[outcome], d.valid[outcome], arms)
+        mu = outcome_predictions(unit, outcome_models, valid.x, "validation")
+        nuisance, m, e = learners.nuisances(train, valid, cross_fitted_e=dataset == "lazada")
+        check_nuisances(unit, m, e)
+        save(frozen, f"{unit} outcome models", outcome_models, manifest)
+        save(frozen, f"{unit} nuisances", nuisance, manifest)
+        fits, scores, losses = {}, {}, {}
+        for model in tuning.MODELS:
+            index = chosen["configs"][unit][model]
+            config = tuning.grid(model)[index]
+            fits[model], scores[model] = [], []
+            for seed in range(5):
+                trees = forest.FINAL_TREES if model == "causal forest" else forest.SEARCH_TREES
+                fitted = fit_final(model, config, train, valid, seed, dataset, trees)
+                scores[model].append(finite(f"unit {unit} {model} seed {seed} on validation rows",
+                                            effect(model, fitted, valid.x), len(valid.y)))
+                fits[model].append(fitted)
+                save(frozen, f"{unit} {model} seed {seed}", fitted, manifest, model, config)
+            losses[model] = learners.r_loss(scores[model][0], valid.y, valid.w, m, e)
+            record = tuning.usable(rows, unit, model).get(index)
+            manifest["comparisons"][f"{unit} {model}"] = {
+                "R-loss": losses[model], "record R-loss": record and record["r_loss"],
+                "fingerprint matches": bool(record and record["fingerprint"] == tuning.fingerprint(m, e))}
+        if "R*" in chosen:
+            r_star = chosen["R*"][unit]
+        else:
+            r_star = min(NON_DEEP, key=lambda model: (losses[model], NON_DEEP.index(model)))
+            dry[unit] = evaluate(unit, scores, mu, d.valid[outcome], r_star, replicates, labels=unit != 2)
+        manifest["configs"][str(unit)], manifest["R*"][str(unit)] = chosen["configs"][unit], r_star
+    path = Path(records).parent / f"{dataset}-manifest.json"
+    path.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
+    if "R*" in chosen:
+        return manifest
+    out.mkdir(parents=True, exist_ok=True)
+    dry |= {"versions": installed, "resources": resources(frozen)}
+    (out / f"{dataset}-dry-run.json").write_text(json.dumps(dry, indent=1) + "\n")
+    return manifest
+
+
+def fit_final(model, config, train, valid, seed, dataset, trees):
+    if model in tuning.META:
+        return learners.fit(model, train, valid, config, seed, cross_fitted_e=dataset == "lazada")
+    if model == "causal forest":
+        return forest.fit(train.rows(forest.criteo_rows()) if dataset == "criteo" else train, valid, config, seed, trees)
+    return deep.fit(model, (train.x, train.w, train.y), (valid.x, valid.w, valid.y), seed=seed, **{"alpha": None, **config})
+
+
+def save(frozen, name, obj, manifest, model=None, config=None):
+    raw = frozen_bytes(model, config, obj) if model else pickle.dumps(obj, protocol=5)
+    (frozen / f"{name}.pkl").write_bytes(raw)
+    manifest["files"][name] = hashlib.sha256(raw).hexdigest()
+    if (cache := resources(frozen)["cache GB"]) > DISK_LIMIT / 1e9:
+        raise Stop(f"the cache directory holds {cache} GB, more than {DISK_LIMIT / 1e9:g} GB")
+
+
+def evaluate(unit, scores, mu, rows, r_star, replicates, labels):
+    """Every registered output of the unit on the given rows (validation rows in the dry run, test rows in the
+    read), from the models' scores and the outcome models' predictions on those rows. The dry run (Sections 4
+    and 11) computes all of them, H6 and H7 on Hillstrom included."""
+    split = two_arms(rows, unit)
+    resampling = groups(split.x)
+    kwargs = {} if replicates is None else {"replicates": replicates}
+    out = results.unit_outputs(unit, scores, split.w, split.y, mu["mu0"], mu["mu1"], resampling, r_star, labels, **kwargs)
+    if unit == 4:
+        v = np.c_[mu["arm1"] - mu["mu0"], mu["arm2"] - mu["mu0"]]
+        three = np.c_[mu["mu0"], mu["arm1"], mu["arm2"]]
+        out["H6 H7"] = results.allocation_outputs(v, rows.w, rows.y, three, scores[r_star][0], resampling, labels, **kwargs)
+    return out
+
+
+class EntryRefused(RuntimeError):
+    pass
+
+
+def entry_checks(dataset, repo, frozen, records_dir):
+    """Section 10: the registered text in the commit that added it, an ancestor of HEAD, and at HEAD; a clean
+    tree; frozen files as in the committed manifest."""
+    added = repo.added(REGISTRATION)
+    if not added or not repo.is_ancestor(added, repo.head()):
+        raise EntryRefused("the registration commit is not an ancestor of HEAD")
+    for commit in (added, "HEAD"):
+        text = repo.blob(commit, REGISTRATION)
+        if text is None or hashlib.sha256(text).hexdigest() != REGISTRATION_SHA256:
+            raise EntryRefused(f"the registration at {commit} is missing or not the registered text")
+    if not repo.clean():
+        raise EntryRefused("the working tree is not clean")
+    manifest = repo.committed(Path(records_dir) / f"{dataset}-manifest.json")
+    if not manifest:
+        raise EntryRefused("no committed manifest")
+    for name, digest in json.loads(manifest)["files"].items():
+        path = Path(frozen) / f"{name}.pkl"
+        if not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise EntryRefused(f"frozen file {name} differs from the manifest")
+    return hashlib.sha256(manifest.encode()).hexdigest()
+
+
+def entries(text, dataset):
+    return [e for e in map(json.loads, text.splitlines()) if e["dataset"] == dataset]
+
+
+def prepare(dataset, repo, frozen, records_dir, out=ROOT / "results"):
+    """Write the read entry (UTC time, commit, manifest hash, token hash) for the operator to commit and push.
+
+    The token itself goes to the frozen directory, outside the repository; `go` uses it once. A second
+    `go`, a lost container or a restart after `go` began finds no token, so a rerun needs a line in
+    AMENDMENTS.md and a new entry (Sections 10 and 11). A manifest other than the first entry's (refits that
+    do not reproduce it) makes the entry a second read."""
+    versions.check()
+    manifest_hash = entry_checks(dataset, repo, frozen, records_dir)
+    reads = Path(records_dir) / "reads.jsonl"
+    earlier = entries(repo.committed(reads), dataset)
+    if earlier:
+        results_committed = repo.committed(Path(out) / f"{dataset}.json") != ""
+        amended = earlier[-1]["time"] in repo.committed(ROOT / "AMENDMENTS.md")
+        if results_committed or not amended:
+            raise EntryRefused("the dataset has a read entry; only an interrupted read recorded in AMENDMENTS.md may rerun")
+    token = secrets.token_hex(32)
+    entry = {"dataset": dataset, "time": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+             "commit": repo.head(), "manifest": manifest_hash, "token": hashlib.sha256(token.encode()).hexdigest(),
+             "rerun": bool(earlier), "second read": bool(earlier) and earlier[0]["manifest"] != manifest_hash}
+    (Path(frozen) / TOKEN).write_text(token)
+    with reads.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
+    return entry
+
+
+def go(dataset, repo, frozen, records_dir, out=ROOT / "results", replicates=None):
+    """The single path to the test rows: the read entry must be committed and pushed, its token unused, nothing
+    else changed, and every frozen model's validation predictions finite.
+
+    The results name HEAD, the commit that holds the read entry, and the command that computed them there
+    (Section 15), and say whether they come from a second read (Section 10)."""
+    installed = versions.check()
+    manifest_hash = entry_checks(dataset, repo, frozen, records_dir)
+    committed = entries(repo.committed(Path(records_dir) / "reads.jsonl"), dataset)
+    if not committed or committed[-1]["manifest"] != manifest_hash or not repo.contains(committed[-1]["commit"]):
+        raise EntryRefused("no committed read entry for this manifest")
+    if repo.committed(out / f"{dataset}.json"):
+        raise EntryRefused("the dataset's results are committed; its test rows are not read again")
+    if not repo.pushed():
+        raise EntryRefused("HEAD is not on the main branch of the remote")
+    token = Path(frozen) / TOKEN
+    if not token.exists() or hashlib.sha256(token.read_bytes()).hexdigest() != committed[-1]["token"]:
+        raise EntryRefused("this machine holds no unused token of the last read entry; a rerun needs its own entry")
+    manifest = json.loads(repo.committed(Path(records_dir) / f"{dataset}-manifest.json"))
+    d = data.load(dataset)
+    frozen_set = {}
+    for unit, outcome in UNITS[dataset].items():
+        load = lambda name: (Path(frozen) / f"{unit} {name}.pkl").read_bytes()
+        fits = {model: [thaw(load(f"{model} seed {s}")) for s in range(5)] for model in tuning.MODELS}
+        outcome_models, nuisance = pickle.loads(load("outcome models")), pickle.loads(load("nuisances"))
+        valid = d.valid[outcome].x
+        predictions(unit, fits, outcome_models, valid, "validation")
+        check_nuisances(unit, nuisance.predict("m", valid), nuisance.propensity(valid))
+        frozen_set[unit] = fits, outcome_models
+    token.unlink()
+    opened = data.OPEN.set(True)
+    try:
+        test, _ = d.test.open()
+        out_all = {}
+        for unit, outcome in UNITS[dataset].items():
+            scores, mu = predictions(unit, *frozen_set[unit], test[outcome].x, "test")
+            out_all[unit] = evaluate(unit, scores, mu, test[outcome], manifest["R*"][str(unit)], replicates,
+                                     labels=unit != 2)
+    finally:
+        data.OPEN.reset(opened)
+    out_all |= {"versions": installed, "resources": resources(frozen), "commit": repo.head(),
+                "command": f"python -m uplift_ranking.run read {dataset} go", "second read": committed[-1]["second read"]}
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"{dataset}.json").write_text(json.dumps(out_all, indent=1) + "\n")
+    return out_all
+
+
+def arguments(argv=None):
+    parser = argparse.ArgumentParser(prog="python -m uplift_ranking.run")
+    parser.add_argument("stage", choices=("search", "block", "read"))
+    parser.add_argument("dataset", choices=tuple(UNITS))
+    parser.add_argument("step", nargs="?", choices=("prepare", "go"))
+    parser.add_argument("--model", action="append", choices=tuning.MODELS)
+    a = parser.parse_args(argv)
+    if (a.stage == "read") != (a.step is not None):
+        parser.error("read takes a step, prepare or go; search and block take none")
+    if a.model and a.stage != "search":
+        parser.error("--model applies to search only")
+    return a
+
+
+def main():
+    a = arguments()
+    repo, frozen, records_dir = Repository(), data.CACHE / a.dataset / "frozen", tuning.RECORDS.parent
+    if a.stage == "search":
+        search(a.dataset, commit=repo.head(), models=a.model or tuning.MODELS)
+    elif a.stage == "block":
+        chosen, disagreements = choose(a.dataset, repo)
+        print(json.dumps({"disagreements": disagreements}))
+        block(a.dataset, chosen, frozen=frozen)
+    elif a.step == "prepare":
+        print(prepare(a.dataset, repo, frozen, records_dir))
+    else:
+        go(a.dataset, repo, frozen, records_dir)
+
+
+if __name__ == "__main__":
+    main()

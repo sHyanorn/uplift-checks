@@ -86,7 +86,7 @@ def cpu_model():
     return ""
 
 
-def fit(model, config, train, valid, seed, dataset, trees=forest.SEARCH_TREES):
+def fit(model, config, train, valid, seed, dataset, trees=None):
     """Fit one model; returns its effect function and the trees or epochs chosen by early stopping."""
     if model in META:
         fitted = learners.fit(model, train, valid, config, seed, cross_fitted_e=dataset == "lazada")
@@ -94,6 +94,7 @@ def fit(model, config, train, valid, seed, dataset, trees=forest.SEARCH_TREES):
     if model == "causal forest":
         if dataset == "criteo":
             train = train.rows(forest.criteo_rows())
+        trees = trees or forest.SEARCH_TREES
         fitted = forest.fit(train, valid, config, seed, trees)
         return (lambda x: forest.effect(fitted, x)), {"trees": trees}
     fitted = deep.fit(model, (train.x, train.w, train.y), (valid.x, valid.w, valid.y), seed=seed, **{"alpha": None, **config})

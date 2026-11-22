@@ -64,5 +64,10 @@ def fit(train, valid, config, seed, trees):
         OutcomeModel.valid = None
 
 
+def outcome_trees(forest):
+    """Trees of each fold's outcome model, chosen by early stopping; the forest's own size is fixed."""
+    return {f"outcome fold {f}": model.booster_.best_iteration for f, model in enumerate(forest.models_y[0])}
+
+
 def effect(forest, x):
     return forest.effect(x).ravel()

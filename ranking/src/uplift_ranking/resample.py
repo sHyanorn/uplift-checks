@@ -92,7 +92,7 @@ class Ranked:
         budget = []
         for gamma in (g, y_t / e - y_c / (1 - e)):
             budget += list(np.interp(np.array(BUDGETS) * n, np.r_[0, k], np.r_[0.0, gamma]) / n)
-        return np.array([v3 / area(perfect_k / n, perfect_q), v3, v4, v3 / q[-1], v6, v9, v10, v11, *budget])
+        return np.array([v3 / area(perfect_k / n, perfect_q), v3, v4, ratio(v3, q[-1]), v6, v9, v10, v11, *budget])
 
 
 _models = None

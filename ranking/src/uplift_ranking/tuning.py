@@ -94,9 +94,8 @@ def fit(model, config, train, valid, seed, dataset, trees=None):
     if model == "causal forest":
         if dataset == "criteo":
             train = train.rows(forest.criteo_rows())
-        trees = trees or forest.SEARCH_TREES
-        fitted = forest.fit(train, valid, config, seed, trees)
-        return (lambda x: forest.effect(fitted, x)), {"trees": trees}
+        fitted = forest.fit(train, valid, config, seed, trees or forest.SEARCH_TREES)
+        return (lambda x: forest.effect(fitted, x)), forest.outcome_trees(fitted)
     fitted = deep.fit(model, (train.x, train.w, train.y), (valid.x, valid.w, valid.y), seed=seed, **{"alpha": None, **config})
     return fitted.effect, {"epochs": fitted.epochs}
 

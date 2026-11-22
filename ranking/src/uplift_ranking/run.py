@@ -131,7 +131,9 @@ def select(dataset, records=tuning.RECORDS):
     for unit in UNITS[dataset]:
         tuning.check_fingerprint(rows, unit)
     chosen = {unit: {model: tuning.select(rows, unit, model) for model in tuning.MODELS} for unit in UNITS[dataset]}
-    disagreements = [r for unit in UNITS[dataset] for model in tuning.MODELS for r in tuning.disagreements(rows, unit, model)]
+    disagreements = [{"unit": unit, "model": model, "config": r["config"], "R-loss": r["r_loss"],
+                      "first R-loss": tuning.usable(rows, unit, model)[r["config"]]["r_loss"]}
+                     for unit in UNITS[dataset] for model in tuning.MODELS for r in tuning.disagreements(rows, unit, model)]
     return chosen, disagreements
 
 
@@ -140,8 +142,8 @@ def choose(dataset, repo, records=tuning.RECORDS):
     (Section 2.1) must be HEAD's, and HEAD on the remote's main branch; HEAD is then the records commit of the
     frozen set.
 
-    Once the dataset has a committed read entry, the block reruns with the configurations, R* and records
-    commit of the committed manifest (Section 11), so that refits that reproduce the frozen files reproduce
+    Once the dataset has a committed read entry, the block reruns with the configurations, R*, records commit and
+    disagreements of the committed manifest (Section 11), so that refits that reproduce the frozen files reproduce
     the manifest hash."""
     records = Path(records)
     committed_code(repo, records)
@@ -152,11 +154,11 @@ def choose(dataset, repo, records=tuning.RECORDS):
     if rerun:
         manifest = json.loads(repo.committed(records.parent / f"{dataset}-manifest.json"))
         return {"configs": {int(u): c for u, c in manifest["configs"].items()}, "records commit": manifest["records commit"],
-                "R*": {int(u): r for u, r in manifest["R*"].items()}}, []
+                "disagreements": manifest["disagreements"], "R*": {int(u): r for u, r in manifest["R*"].items()}}
     if not repo.pushed():
         raise Stop("HEAD is not on the main branch of the remote")
     configs, disagreements = select(dataset, records)
-    return {"configs": configs, "records commit": repo.head()}, disagreements
+    return {"configs": configs, "records commit": repo.head(), "disagreements": disagreements}
 
 
 def frozen_bytes(model, config, fitted):
@@ -228,7 +230,7 @@ def block(dataset, chosen, records=tuning.RECORDS, frozen=None, out=ROOT / "resu
     frozen = frozen or data.CACHE / dataset / "frozen"
     frozen.mkdir(parents=True, exist_ok=True)
     manifest = {"dataset": dataset, "records commit": chosen["records commit"], "configs": {}, "R*": {}, "files": {},
-                "comparisons": {}}
+                "comparisons": {}, "disagreements": chosen["disagreements"]}
     if dataset == "criteo":
         manifest["forest rows"] = hashlib.sha256(forest.criteo_rows().tobytes()).hexdigest()
     rows = tuning.read(records)
@@ -502,9 +504,7 @@ def main():
     if a.stage == "search":
         search(a.dataset, repo, models=a.model or tuning.MODELS)
     elif a.stage == "block":
-        chosen, disagreements = choose(a.dataset, repo)
-        print(json.dumps({"disagreements": disagreements}))
-        block(a.dataset, chosen, frozen=frozen)
+        block(a.dataset, choose(a.dataset, repo), frozen=frozen)
     elif a.step == "prepare":
         print(prepare(a.dataset, repo, frozen, records_dir))
     else:

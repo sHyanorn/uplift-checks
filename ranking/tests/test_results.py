@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from uplift_ranking import propositions as P
 from uplift_ranking import results
@@ -36,3 +37,12 @@ def test_identical_differences_and_reversed_pairs_are_reported():
     assert out["H1a"]["reversed pairs"] == P.reversals({v: points[v] for v in P.H1A}) != {}
     for a, b in P.H1B:
         assert out[f"H1b {a} {b}"]["reversed pairs"] == P.reversals({a: points[a], b: points[b]})
+    # The two medians that Sections 7 and 8 leave open are reported under both readings.
+    mdd_sim = (out["H2"]["c"] + 0.84) * (np.array(out["H2"]["high"]) - np.array(out["H2"]["low"])) / (2 * out["H2"]["c"])
+    expected = {"both": np.median(mdd_sim), "V6": np.median(mdd_sim[:36]), "V11": np.median(mdd_sim[36:])}
+    assert out["H2"]["median MDD_sim"] == pytest.approx(expected, rel=1e-9)
+    ratio = lambda item: (item["AIPW"]["high"] - item["AIPW"]["low"]) / (item["IPW"]["high"] - item["IPW"]["low"])
+    distinct = [item for item in out["H5"] if item["IPW"]["high"] > item["IPW"]["low"]]
+    assert out["H5 width ratio"] == pytest.approx(np.median([ratio(item) for item in distinct]), rel=1e-9)
+    for k in (0.1, 0.3, 0.5):
+        assert out["H5 width ratio by k"][k] == pytest.approx(np.median([ratio(i) for i in distinct if i["k"] == k]), rel=1e-9)

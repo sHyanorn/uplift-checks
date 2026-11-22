@@ -138,3 +138,10 @@ def test_a_non_finite_score_is_not_ranked():
     score[40] = np.nan
     with pytest.raises(ValueError, match="a score is NaN or infinite"):
         resample.Ranked(score, t.w, t.y, t.mu0, t.mu1, np.arange(300))
+
+
+def test_a_replicate_with_q1_zero_has_v5_zero():
+    score, w, y = np.array([2.0, 1.0]), np.array([1, 0]), np.array([1, 1])
+    ranked = resample.Ranked(score, w, y, np.full(2, 0.5), np.full(2, 0.5), np.arange(2))
+    values = dict(zip(resample.STATISTICS, ranked.statistics(np.ones(2, dtype=bool))))
+    assert values["V3"] != 0 and values["V5"] == 0

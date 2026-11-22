@@ -79,7 +79,7 @@ def qini_end(w, y):
 
 def qini_share(score, w, y):
     """V5: Singh's Qini, G(phi) = Q(phi n) / Q(n)."""
-    return qini(score, w, y) / qini_end(w, y)
+    return float(ratio(qini(score, w, y), qini_end(w, y)))
 
 
 def qini_scaled(score, w, y):

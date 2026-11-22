@@ -48,6 +48,7 @@ def test_settings_reach_econml(fitted):
     outcome = [m for fold in fitted.models_y for m in fold]
     assert len(outcome) == 2 and all(isinstance(m, forest.OutcomeModel) for m in outcome)
     assert all(0 < m.booster_.best_iteration < 1000 for m in outcome)
+    assert forest.outcome_trees(fitted) == {f"outcome fold {f}": m.booster_.best_iteration for f, m in enumerate(outcome)}
     assert all(m.booster_.params["num_leaves"] == 63 and m.booster_.params["seed"] == 0 for m in outcome)
 
 

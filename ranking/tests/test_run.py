@@ -85,7 +85,7 @@ def staged(tmp_path_factory):
     data.check_role_counts("hillstrom", np.repeat(list(sizes), list(sizes.values())), None, records.parent)  # as the first search does
     run.search("hillstrom", FakeRepository(), records)
     configs, disagreements = run.select("hillstrom", records)
-    chosen = {"configs": configs, "records commit": "c-head"}
+    chosen = {"configs": configs, "records commit": "c-head", "disagreements": disagreements}
     manifest = run.block("hillstrom", chosen, records, tmp / "frozen", tmp / "results", replicates=20)
     first = (records.parent / "hillstrom-manifest.json").read_text()
     run.block("hillstrom", chosen, records, tmp / "frozen-again", tmp / "results", replicates=20)
@@ -127,8 +127,8 @@ def test_selection_reads_committed_files_only(staged):
     with pytest.raises(run.Stop, match="remote"):
         run.choose("hillstrom", repo, records)
     repo.is_pushed = True
-    chosen, _ = run.choose("hillstrom", repo, records)
-    assert chosen == {"configs": run.select("hillstrom", records)[0], "records commit": "c-head"}
+    configs, disagreements = run.select("hillstrom", records)
+    assert run.choose("hillstrom", repo, records) == {"configs": configs, "records commit": "c-head", "disagreements": disagreements}
 
 
 def test_the_search_and_the_block_refuse_uncommitted_files(staged):
@@ -155,6 +155,12 @@ def test_selection_stops_on_records_under_two_fingerprints(staged, tmp_path):
         run.select("hillstrom", records)
 
 
+def test_selection_lists_disagreeing_duplicates(staged, tmp_path):
+    records, rows = rewritten(staged, tmp_path, lambda rows: rows.append(rows[0] | {"r_loss": rows[0]["r_loss"] + 1}))
+    assert run.select("hillstrom", records)[1] == [{"unit": 4, "model": rows[0]["model"], "config": rows[0]["config"],
+                                                     "R-loss": rows[0]["r_loss"] + 1, "first R-loss": rows[0]["r_loss"]}]
+
+
 @pytest.mark.parametrize("problem", ["S seed 0", "m-hat", "mu1", "versions", "disk"])
 def test_the_block_stops(staged, problem, monkeypatch, tmp_path):
     d, _, staged_records, *_ = staged
@@ -178,7 +184,8 @@ def test_the_block_stops(staged, problem, monkeypatch, tmp_path):
     match = {"S seed 0": "S seed 0 on validation", "m-hat": "m-hat", "mu1": "outcome model mu1 on validation",
              "versions": "scikit-learn", "disk": "cache directory"}[problem]
     with pytest.raises(error, match=match):
-        run.block("hillstrom", {"configs": configs, "records commit": "c-head"}, records, tmp_path / "frozen", tmp_path / "results", 20)
+        run.block("hillstrom", {"configs": configs, "records commit": "c-head", "disagreements": []}, records, tmp_path / "frozen",
+                  tmp_path / "results", 20)
     assert not (tmp_path / "results").exists()
 
 
@@ -400,13 +407,14 @@ def test_a_block_after_the_read_entry_reruns_the_committed_manifest(staged, tmp_
     path = records_dir / "hillstrom-manifest.json"
     manifest = json.loads(repo.committed(path))
     manifest["R*"]["4"] = next(m for m in run.NON_DEEP if m != manifest["R*"]["4"])  # an R* the refits would not pick
+    manifest["disagreements"] = [{"unit": 4, "model": "S", "config": 0, "R-loss": 0.2, "first R-loss": 0.1}]
     repo.files[str(path.resolve())] = json.dumps(manifest, indent=1, sort_keys=True) + "\n"
     entry = run.prepare("hillstrom", repo, tmp / "frozen", records_dir, tmp / "results")
     repo.commit(records_dir / "reads.jsonl")
     repo.head = lambda: "c-later"
     repo.history.add("c-later")
     # The container is lost after the read entry; a new one reruns the block at a later HEAD.
-    chosen, _ = run.choose("hillstrom", repo, records_dir / "trials.jsonl")
+    chosen = run.choose("hillstrom", repo, records_dir / "trials.jsonl")
     records = tmp_path / "records" / "trials.jsonl"
     records.parent.mkdir()
     shutil.copy(records_dir / "trials.jsonl", records)
@@ -475,7 +483,7 @@ def test_each_stage_checks_the_versions_before_it_loads_the_data(staged, stage, 
     _, tmp, records_dir, repo = read_setup(staged)
     run.prepare("hillstrom", repo, tmp / "frozen", records_dir, tmp / "results")  # the read passes its entry checks
     repo.commit(records_dir / "reads.jsonl")
-    chosen = {"configs": run.select("hillstrom", records_dir / "trials.jsonl")[0], "records commit": "c-head"}
+    chosen = {"configs": run.select("hillstrom", records_dir / "trials.jsonl")[0], "records commit": "c-head", "disagreements": []}
 
     def load(name):
         raise AssertionError("the data were loaded before the versions were checked")

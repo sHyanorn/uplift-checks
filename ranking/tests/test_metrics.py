@@ -307,3 +307,10 @@ def test_the_first_library_call_keeps_no_frame_of_its_caller():
     """A frame kept after the first call would hold a whole unit's scores and rankings through the next unit."""
     out = subprocess.run([sys.executable, "-W", "ignore", "-c", RELEASE], capture_output=True, text=True, check=True).stdout
     assert out.splitlines()[-1] == "True"
+
+
+def test_v5_is_zero_where_q1_is_zero():
+    """Section 5.1: a ratio with a zero denominator is taken as 0."""
+    score, w, y = np.array([2.0, 1.0]), np.array([1, 0]), np.array([1, 1])
+    assert m.qini_end(w, y) == 0 and m.qini(score, w, y) != 0
+    assert m.qini_share(score, w, y) == 0

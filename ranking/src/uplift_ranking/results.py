@@ -82,7 +82,9 @@ def unit_outputs(unit, scores, w, y, mu0, mu1, groups, r_star, labels=True, repl
                  "marginal": P.counts(P.separated_pairs(marginal["separated"])),
                  "low": rounded(f72["low"]), "high": rounded(f72["high"]), "seeds": by_difference(seeds72),
                  "identical": [int(i) for i in f72["identical"]],
-                 "median MDD_sim": {"V6": float(np.median(resample.mdd(f72["se"][:36], f72["c"]))),
+                 # Section 7 allows two readings of this median: over the family of 72, and per metric.
+                 "median MDD_sim": {"both": float(np.median(resample.mdd(f72["se"], f72["c"]))),
+                                    "V6": float(np.median(resample.mdd(f72["se"][:36], f72["c"]))),
                                     "V11": float(np.median(resample.mdd(f72["se"][36:], f72["c"])))},
                  "median MDD": {"V6": float(np.median(resample.mdd(f72["se"][:36]))),
                                 "V11": float(np.median(resample.mdd(f72["se"][36:])))}}
@@ -135,7 +137,7 @@ def unit_outputs(unit, scores, w, y, mu0, mu1, groups, r_star, labels=True, repl
         out["H4"][group] = item
 
     out["H5"] = []
-    widths = []
+    widths = {k: [] for k in resample.BUDGETS}
     for k in resample.BUDGETS:
         for d in P.MODELS:
             if d == r_star:
@@ -149,9 +151,12 @@ def unit_outputs(unit, scores, w, y, mu0, mu1, groups, r_star, labels=True, repl
                     item[scores_kind]["label"] = P.value(low, high)
             ipw_width = item["IPW"]["high"] - item["IPW"]["low"]
             if ipw_width > 0:  # 0 only for a model identical to R* on these rows
-                widths.append((item["AIPW"]["high"] - item["AIPW"]["low"]) / ipw_width)
+                widths[k].append((item["AIPW"]["high"] - item["AIPW"]["low"]) / ipw_width)
             out["H5"].append(item)
-    out["H5 width ratio"] = float(np.median(widths)) if widths else None
+    # Section 8 allows two readings of this median: over the models at every budget together, and per budget.
+    median = lambda ratios: float(np.median(ratios)) if ratios else None
+    out["H5 width ratio"] = median(sum(widths.values(), []))
+    out["H5 width ratio by k"] = {k: median(ratios) for k, ratios in widths.items()}
     return out
 
 

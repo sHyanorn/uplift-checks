@@ -47,16 +47,18 @@ def deep_index(model, **want):
     return next(i for i, c in enumerate(tuning.grid(model)) if all(c[k] == v for k, v in want.items()))
 
 
-@pytest.mark.parametrize("model, index", [("T", 120), ("TARNet", None)])
-def test_a_trial_record_holds_summaries_only(splits, model, index, tmp_path):
+@pytest.mark.parametrize("model, index", [("T", 120), ("causal forest", 0), ("TARNet", None)])
+def test_a_trial_record_holds_summaries_only(splits, model, index, tmp_path, monkeypatch):
     train, valid, m, e = splits
+    monkeypatch.setattr(tuning.forest, "SEARCH_TREES", 8)
     index = index if index is not None else deep_index("TARNet", rank=32, batch=2048, lr=5e-3)
     record = tuning.trial("hillstrom", 4, model, index, train, valid, m, e, commit="abc123")
     assert tuple(record) == tuning.FIELDS
     effect, _ = tuning.fit(model, tuning.grid(model)[index], train, valid, 0, "hillstrom")
     assert record["r_loss"] == learners.r_loss(effect(valid.x), valid.y, valid.w, m, e)
     assert record["fingerprint"] == tuning.fingerprint(m, e) and record["code"] == tuning.code_hash(model)
-    assert set(record["stopping"]) == ({"mu0", "mu1"} if model == "T" else {"epochs"})
+    components = {"T": {"mu0", "mu1"}, "causal forest": {"outcome fold 0", "outcome fold 1"}, "TARNet": {"epochs"}}
+    assert set(record["stopping"]) == components[model] and all(0 < n < 1000 for n in record["stopping"].values())
     tuning.append(record, tmp_path / "trials.jsonl")
     line = (tmp_path / "trials.jsonl").read_text()
     assert len(line) < 1500 and line.count("\n") == 1
@@ -140,6 +142,7 @@ def test_criteo_forest_is_fitted_on_the_drawn_rows(monkeypatch, splits):
     seen = {}
     monkeypatch.setattr(tuning.forest, "criteo_rows", lambda: np.arange(0, len(train.y), 3))
     monkeypatch.setattr(tuning.forest, "fit", lambda t, v, c, s, trees: seen.update(rows=len(t.y), trees=trees))
+    monkeypatch.setattr(tuning.forest, "outcome_trees", lambda fitted: {})
     tuning.fit("causal forest", tuning.grid("causal forest")[0], train, valid, 0, "criteo")
     assert seen == {"rows": len(range(0, len(train.y), 3)), "trees": 200}
     tuning.fit("causal forest", tuning.grid("causal forest")[0], train, valid, 0, "lazada")

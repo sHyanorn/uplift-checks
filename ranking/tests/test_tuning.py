@@ -47,6 +47,7 @@ def deep_index(model, **want):
     return next(i for i, c in enumerate(tuning.grid(model)) if all(c[k] == v for k, v in want.items()))
 
 
+@pytest.mark.filterwarnings("ignore:Could not generate out-of-bag:UserWarning")
 @pytest.mark.parametrize("model, index", [("T", 120), ("causal forest", 0), ("TARNet", None)])
 def test_a_trial_record_holds_summaries_only(splits, model, index, tmp_path, monkeypatch):
     train, valid, m, e = splits

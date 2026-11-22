@@ -8,10 +8,14 @@ Records, manifests and results are written under ranking/ and committed by the o
 files stay in the cache directory. Test rows are opened only inside `read ... go`.
 
 Every stage checks the package versions first: nothing is downloaded, written or fitted, and no test
-row is read, under other versions. Stop conditions of Section 10 raise Stop: a package version other
-than the registered ones, a missing or non-finite prediction of a frozen model, a cache directory
-above 25 GB, a rehearsed read above MEMORY_LIMIT, uncommitted files in the search or the block, and in
-the block trial records or role counts that are not HEAD's or not on the remote's main branch.
+row is read, under other versions. Stop is raised in two kinds of case. Stop conditions of Section 10,
+reported and resolved by an amendment before the read: a missing or non-finite prediction of a frozen
+model, a cache directory above 25 GB and a rehearsed read above MEMORY_LIMIT; a non-finite prediction
+on test rows stops `go` after its token is gone, which leaves an interrupted read (Section 10).
+Operating refusals, resolved by a commit or a push: uncommitted files in the search or the block, and
+in the block trial records or role counts that are not HEAD's, or a HEAD that is not on the remote's
+main branch. The other stop conditions of Section 10 raise their own errors: data.StopCheck (the
+checks of Section 2 and the role counts), versions.VersionMismatch and tuning.FingerprintMismatch.
 """
 
 import argparse
@@ -45,7 +49,9 @@ TOKEN = "read token"
 
 
 class Stop(RuntimeError):
-    """A stop condition of Section 10, reported and resolved by an amendment before the read."""
+    """A stop condition of Section 10, reported and resolved by an amendment: before the read, or as an
+    interrupted read when it is raised on test rows inside `go`. Also an operating refusal (uncommitted files,
+    records or role counts that are not HEAD's, an unpushed HEAD), resolved by a commit or a push."""
 
 
 class Repository:

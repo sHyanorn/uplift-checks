@@ -96,15 +96,20 @@ def lazada_zip(tmp_path, duplicate_id=False):
         parts[part] = frame
     if duplicate_id:
         parts["test"].loc[0, "data_id"] = 0
-    members = {f"full_{p}set.csv": f.to_csv(index=False).encode() for p, f in parts.items()} | {"LICENSE": b"BSD 2-clause"}
+    directory = "lzd_data_public/"  # the real archive's layout: its members sit under a directory, with macOS metadata entries
+    members = {f"{directory}full_{p}set.csv": f.to_csv(index=False).encode() for p, f in parts.items()}
+    members |= {f"{directory}LICENSE": b"BSD 2-clause"}
     path = tmp_path / "lzd.zip"
     with zipfile.ZipFile(path, "w") as z:
+        z.writestr(directory, b"")
+        z.writestr("__MACOSX/._lzd_data_public", bytes(314))
         for name, content in members.items():
             z.writestr(name, content)
+            z.writestr(f"__MACOSX/{directory}._{name.removeprefix(directory)}", bytes(214))
     raw = path.read_bytes()
     source = data.Source("", "lzd.zip", len(raw), sha(raw), hashlib.md5(raw).hexdigest(),
                          tuple((name, sha(c)) for name, c in members.items()),
-                         frozenset(hashlib.md5(members[f"full_{p}set.csv"]).hexdigest() for p in parts))
+                         frozenset(hashlib.md5(members[f"{directory}full_{p}set.csv"]).hexdigest() for p in parts))
     x = parts["train"][data.LAZADA_FEATURES].to_numpy().astype(np.float32)
     counts = role_counts(x, "lazada")
     expected = {p: (len(f), int(f["is_treat"].sum())) for p, f in parts.items()}
@@ -114,11 +119,12 @@ def lazada_zip(tmp_path, duplicate_id=False):
 
 def test_lazada_checks(tmp_path):
     path, source, expected = lazada_zip(tmp_path)
+    assert [name for name, _ in source.members] == [name for name, _ in data.SOURCES["lazada"].members]
     data.verify(source, path)
     d = data.read_lazada(path, expected, tmp_path)
     assert len(d.valid["label"].y) == expected["roles"][VALIDATION]
     for broken in (replace(source, md5="0" * 32), replace(source, member_md5s=frozenset({"0" * 32})),
-                   replace(source, members=source.members[:2] + (("LICENSE", "0" * 64),)), replace(source, size=source.size + 1)):
+                   replace(source, members=source.members[:2] + ((source.members[2][0], "0" * 64),)), replace(source, size=source.size + 1)):
         with pytest.raises(data.StopCheck):
             data.verify(broken, path)
     with pytest.raises(data.StopCheck):

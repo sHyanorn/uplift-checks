@@ -46,9 +46,9 @@ SOURCES = {
         "lzd_data_public.zip", 101_629_017,
         "a657288e9a54539008004b321fcf986737e94aeea8468b9d70b96f6a974e73db",
         md5="545bb0eae05cca58f0d813a990ed9cba",
-        members=(("full_trainset.csv", "79cb6e5c2fb7ad0c35710a84ed82275baa167647b17bf3423f402602b02b5bf0"),
-                 ("full_testset.csv", "1eec5f10b838ca3a43f6ccaf1b7af9260e300be36df452be58ee6678d7e1a326"),
-                 ("LICENSE", "3ae95b8e3fa8f3cae1af3c44274586179e7dda9f3cddba6bc7565d249c7cc7a3")),
+        members=(("lzd_data_public/full_trainset.csv", "79cb6e5c2fb7ad0c35710a84ed82275baa167647b17bf3423f402602b02b5bf0"),
+                 ("lzd_data_public/full_testset.csv", "1eec5f10b838ca3a43f6ccaf1b7af9260e300be36df452be58ee6678d7e1a326"),
+                 ("lzd_data_public/LICENSE", "3ae95b8e3fa8f3cae1af3c44274586179e7dda9f3cddba6bc7565d249c7cc7a3")),
         member_md5s=frozenset({"efffc70375e700bcb91a9d41eddd7f66", "9058fa57b984f0112a1ecf71dc52fb1e"})),
     "hillstrom": Source(
         "http://www.minethatdata.com/Kevin_Hillstrom_MineThatData_E-MailAnalytics_DataMiningChallenge_2008.03.20.csv",
@@ -203,7 +203,7 @@ def read_criteo(path, expected=EXPECTED["criteo"], records=RECORDS):
 
 def read_lazada(path, expected=EXPECTED["lazada"], records=RECORDS):
     with zipfile.ZipFile(path) as z:
-        frames = {part: pd.read_csv(z.open(f"full_{part}set.csv")) for part in ("train", "test")}
+        frames = {part: pd.read_csv(z.open(f"lzd_data_public/full_{part}set.csv")) for part in ("train", "test")}
     for part, frame in frames.items():
         check_common(frame, LAZADA_FEATURES + ["is_treat", "label", "data_id"], f"lazada {part}")
         rows, treated = expected[part]

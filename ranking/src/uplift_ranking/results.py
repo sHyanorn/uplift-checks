@@ -150,7 +150,7 @@ def unit_outputs(unit, scores, w, y, mu0, mu1, groups, r_star, labels=True, repl
                 if labels:
                     item[scores_kind]["label"] = P.value(low, high)
             ipw_width = item["IPW"]["high"] - item["IPW"]["low"]
-            if ipw_width > 0:  # 0 only for a model identical to R* on these rows
+            if ipw_width > 0:  # 0 when the contrast is 0 in every replicate, as for a model that ranks these rows as R* does
                 widths[k].append((item["AIPW"]["high"] - item["AIPW"]["low"]) / ipw_width)
             out["H5"].append(item)
     # Section 8 allows two readings of this median: over the models at every budget together, and per budget.

@@ -130,11 +130,15 @@ class FingerprintMismatch(RuntimeError):
     pass
 
 
-def check_fingerprint(records, unit, value):
-    """Stop (search) if m-hat and e differ from those of the unit's first record."""
-    first = next((r for r in records if r["unit"] == unit), None)
-    if first is not None and first["fingerprint"] != value:
-        raise FingerprintMismatch(f"unit {unit}: fingerprint {value} differs from the first record's {first['fingerprint']}")
+def check_fingerprint(records, unit, value=None):
+    """Stop (Section 10) if a record of the unit, or `value` (this machine's m-hat and e), differs in fingerprint
+    from the unit's first record. Records in use count: those written with their model's current fitting code."""
+    code = {model: code_hash(model) for model in MODELS}
+    found = [r["fingerprint"] for r in records if r["unit"] == unit and r["code"] == code[r["model"]]]
+    found += [] if value is None else [value]
+    for fingerprint in found:
+        if fingerprint != found[0]:
+            raise FingerprintMismatch(f"unit {unit}: fingerprint {fingerprint} differs from the first record's {found[0]}")
 
 
 def usable(records, unit, model):

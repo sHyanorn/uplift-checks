@@ -127,6 +127,10 @@ def test_fingerprint_stops_the_search():
     tuning.check_fingerprint(records, 2, "anything")
     with pytest.raises(tuning.FingerprintMismatch):
         tuning.check_fingerprint(records, 3, "a")
+    with pytest.raises(tuning.FingerprintMismatch):
+        tuning.check_fingerprint(records + [record(2, 1.0, unit=1, fingerprint="b")], 1)
+    unused = [record(0, 1.0, code="of older fitting code", fingerprint="b"), record(1, 1.0, fingerprint="a")]
+    tuning.check_fingerprint(unused, 1, "a")  # Section 11: a record that is not used does not stop the search
     m, e = np.arange(4.0), np.full(4, 0.3)
     assert tuning.fingerprint(m, e) == tuning.fingerprint(m.astype(np.float32), e) != tuning.fingerprint(m + 1e-12, e)
 

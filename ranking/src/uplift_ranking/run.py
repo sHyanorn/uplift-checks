@@ -110,7 +110,11 @@ def search(dataset, records=tuning.RECORDS, commit="", models=tuning.MODELS):
 
 
 def select(dataset, records=tuning.RECORDS):
+    """Each unit's configurations, and the duplicate records that disagree with their trial's first (Section 11).
+    Stops if a unit's records were made with different m-hat and e (Section 10): their R-losses do not compare."""
     rows = tuning.read(records)
+    for unit in UNITS[dataset]:
+        tuning.check_fingerprint(rows, unit)
     chosen = {unit: {model: tuning.select(rows, unit, model) for model in tuning.MODELS} for unit in UNITS[dataset]}
     disagreements = [r for unit in UNITS[dataset] for model in tuning.MODELS for r in tuning.disagreements(rows, unit, model)]
     return chosen, disagreements

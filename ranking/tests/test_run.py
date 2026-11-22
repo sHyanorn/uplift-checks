@@ -126,6 +126,20 @@ def test_selection_reads_committed_records_only(staged):
     assert chosen == {"configs": run.select("hillstrom", records)[0], "records commit": "c-head"}
 
 
+def rewritten(staged, tmp_path, change):
+    """A copy of the staged trial records after `change` has edited the list of records."""
+    rows = tuning.read(staged[2])
+    change(rows)
+    (tmp_path / "trials.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return tmp_path / "trials.jsonl", rows
+
+
+def test_selection_stops_on_records_under_two_fingerprints(staged, tmp_path):
+    records, _ = rewritten(staged, tmp_path, lambda rows: rows[-1].update(fingerprint="of another machine"))
+    with pytest.raises(tuning.FingerprintMismatch, match="unit 4"):
+        run.select("hillstrom", records)
+
+
 @pytest.mark.parametrize("problem", ["S seed 0", "m-hat", "mu1", "versions", "disk"])
 def test_the_block_stops(staged, problem, monkeypatch, tmp_path):
     d, _, staged_records, *_ = staged

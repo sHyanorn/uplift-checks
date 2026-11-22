@@ -77,6 +77,10 @@ class DESCN(nn.Module):
     def loss(self, x, w, y, alpha):
         propensity, treated, control, pseudo = self.heads(x)
         pi, mu1, mu0 = torch.sigmoid(propensity), torch.sigmoid(treated), torch.sigmoid(control)
+        if torch.isnan(pi + mu1 + mu0).any():
+            # F.binary_cross_entropy raises on NaN. A NaN loss lets a diverged fit end as TARNet's and EFIN's
+            # do, with non-finite weights and predictions, so that its R-loss is inf (Section 11).
+            return torch.nan * (propensity + treated + control + pseudo).sum()
         entire_space = (
             F.binary_cross_entropy(pi, w)
             + F.binary_cross_entropy(pi * mu1, w * y)

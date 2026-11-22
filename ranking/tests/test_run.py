@@ -6,8 +6,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
-from uplift_ranking import data, forest, learners, run, tuning, versions
+from uplift_ranking import data, deep, forest, learners, run, tuning, versions
 from uplift_ranking.learners import Split
 from uplift_ranking.roles import TEST, TRAINING, VALIDATION, groups, roles
 
@@ -425,6 +426,14 @@ def test_r_star_and_thawed_models_reproduce_the_dry_run(staged):
     dry = json.loads((tmp / "results" / "hillstrom-dry-run.json").read_text())["4"]
     assert json.loads(json.dumps(again["values"])) == dry["values"]
     assert json.loads(json.dumps(again["H2"])) == dry["H2"]
+
+
+def test_thawed_deep_models_predict_under_the_registered_torch_settings(staged):
+    _, tmp, *_ = staged
+    torch.set_num_threads(1)
+    torch.use_deterministic_algorithms(False)
+    run.thaw((tmp / "frozen" / "4 EFIN seed 0.pkl").read_bytes())
+    assert torch.get_num_threads() == deep.THREADS and torch.are_deterministic_algorithms_enabled()
 
 
 def test_stand_in_rows_take_their_values_from_the_validation_rows(staged):

@@ -148,6 +148,7 @@ def frozen_bytes(model, config, fitted):
 def thaw(raw):
     obj = pickle.loads(raw)
     if isinstance(obj, dict) and obj.get("model") in tuning.DEEP:
+        deep.configure()  # Section 11: a thawed model predicts under the torch settings of its fit
         module = deep.MODELS[obj["model"]](len(obj["mean"]), obj["config"]["rank"])
         module.load_state_dict({k: deep.torch.from_numpy(v) for k, v in obj["state"].items()})
         return deep.Fitted(module, obj["mean"], obj["sd"], obj["epochs"], obj["losses"])

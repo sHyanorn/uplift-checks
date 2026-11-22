@@ -3,7 +3,7 @@ import pytest
 import torch
 from scipy.special import expit
 
-from uplift_ranking import deep
+from uplift_ranking import deep, learners
 from uplift_ranking.synthetic import rct
 
 SETTINGS = dict(rank=32, batch=256, lr=3e-3, weight_decay=1e-4, alpha=0.5, standardise=True, max_epochs=4)
@@ -110,3 +110,12 @@ def test_standardisation_uses_training_moments(data):
     assert np.allclose(fitted.inputs(train[0]).numpy().std(axis=0), 1, atol=1e-3)
     raw = deep.fit("TARNet", train, valid, seed=0, **dict(SETTINGS, max_epochs=1, batch=4096, standardise=False))
     assert np.array_equal(raw.inputs(valid[0]).numpy(), valid[0])
+
+
+@pytest.mark.parametrize("model", list(deep.MODELS))
+def test_a_diverged_fit_ends_with_r_loss_inf(model, data):
+    """Section 11: a non-finite validation prediction is recorded as R-loss inf, whatever the model."""
+    train, valid, _ = data
+    fitted = deep.fit(model, train, valid, seed=0, **dict(SETTINGS, lr=1e30, max_epochs=2))
+    assert all(np.isnan(loss) for loss in fitted.losses)
+    assert learners.r_loss(fitted.effect(valid[0]), valid[2], valid[1], 0.2, 0.3) == float("inf")

@@ -1,6 +1,6 @@
 import hashlib
 import json
-import pickle
+import multiprocessing
 import shutil
 from pathlib import Path
 
@@ -420,10 +420,52 @@ def test_r_star_and_thawed_models_reproduce_the_dry_run(staged):
     d, tmp, records, manifest, *_ = staged
     losses = {m: manifest["comparisons"][f"4 {m}"]["R-loss"] for m in run.NON_DEEP}
     assert manifest["R*"]["4"] == min(run.NON_DEEP, key=lambda m: (losses[m], run.NON_DEEP.index(m)))
-    fits = {m: [run.thaw((tmp / "frozen" / f"4 {m} seed {s}.pkl").read_bytes()) for s in range(5)] for m in tuning.MODELS}
-    outcome_models = pickle.loads((tmp / "frozen" / "4 outcome models.pkl").read_bytes())
-    scores, mu = run.predictions(4, fits, outcome_models, d.valid["visit"].x, "validation")
+    scores, mu = run.frozen_predictions(4, tmp / "frozen", d.valid["visit"].x, "validation")
     again = run.evaluate(4, scores, mu, d.valid["visit"], manifest["R*"]["4"], 20, labels=True)
     dry = json.loads((tmp / "results" / "hillstrom-dry-run.json").read_text())["4"]
     assert json.loads(json.dumps(again["values"])) == dry["values"]
     assert json.loads(json.dumps(again["H2"])) == dry["H2"]
+
+
+def test_stand_in_rows_take_their_values_from_the_validation_rows(staged):
+    valid = staged[0].valid["visit"]
+    rows = run.stand_in(valid, 3000, 4)
+    assert rows.x.shape == (3000, valid.x.shape[1]) and rows.x.dtype == valid.x.dtype
+    assert all(set(rows.x[:, j]) <= set(valid.x[:, j]) for j in range(valid.x.shape[1]))
+    assert set(zip(rows.w.tolist(), rows.y.tolist())) <= set(zip(valid.w.tolist(), valid.y.tolist()))
+    assert len(np.unique(rows.x, axis=0)) > len(valid.y)  # more distinct feature vectors than rows drawn whole would give
+
+
+def hold(megabytes):
+    global held
+    held = np.ones(megabytes * 2**20 // 8)
+
+
+def test_tree_memory_counts_the_children():
+    before = run.tree_memory()
+    with multiprocessing.get_context("fork").Pool(1) as pool:
+        pool.apply(hold, (200,))
+        assert run.tree_memory() - before > 150 * 2**20
+    assert before > 2**20
+
+
+def test_prepare_rehearses_the_read_on_synthetic_rows_of_the_test_size(staged, monkeypatch):
+    d, tmp, records_dir, repo = read_setup(staged)
+    seen, real = [], run.evaluate
+
+    def evaluate(unit, scores, mu, rows, *args, **kwargs):
+        seen.append((len(rows.y), data.OPEN.get(), (tmp / "frozen" / run.TOKEN).exists()))
+        return real(unit, scores, mu, rows, *args, **kwargs)
+
+    monkeypatch.setattr(run, "evaluate", evaluate)
+    entry = run.prepare("hillstrom", repo, tmp / "frozen", records_dir, tmp / "results")
+    assert seen == [(len(d.test), False, False)]  # the test rows stay sealed and no token exists yet
+    assert 0 < entry["rehearsal GiB"] < run.MEMORY_LIMIT / 2**30
+
+
+def test_a_rehearsal_above_the_memory_limit_stops_before_the_entry(staged, monkeypatch):
+    _, tmp, records_dir, repo = read_setup(staged)
+    monkeypatch.setattr(run, "MEMORY_LIMIT", 2**20)
+    with pytest.raises(run.Stop, match="rehearsed on .* synthetic rows took .* GiB"):
+        run.prepare("hillstrom", repo, tmp / "frozen", records_dir, tmp / "results")
+    assert not (tmp / "frozen" / run.TOKEN).exists() and not (records_dir / "reads.jsonl").exists()

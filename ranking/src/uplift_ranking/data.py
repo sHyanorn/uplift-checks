@@ -127,6 +127,9 @@ class Sealed:
             raise PermissionError("test rows are read only through the entry point (Section 10)")
         return self._split, self._groups
 
+    def __len__(self):
+        return len(self._groups)
+
 
 OPEN = contextvars.ContextVar("test rows open", default=False)
 

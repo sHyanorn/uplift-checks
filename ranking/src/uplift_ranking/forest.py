@@ -23,14 +23,15 @@ def criteo_rows():
 
 
 class OutcomeModel(ClassifierMixin, BaseEstimator):
-    """LightGBM with the settings of 5.3 and early stopping on the validation rows, as a classifier."""
+    """LightGBM with the settings of 5.3 and early stopping on the validation rows, as a classifier.
 
-    def __init__(self, valid_x=None, valid_y=None):
-        self.valid_x = valid_x
-        self.valid_y = valid_y
+    The class holds the validation rows while a forest is fitted: EconML keeps four copies of the
+    estimator, and rows held by an instance would be frozen four times with every forest."""
+
+    valid = None
 
     def fit(self, x, y, sample_weight=None):
-        self.booster_ = booster(x, y, self.valid_x, self.valid_y, FIXED, 0)
+        self.booster_ = booster(x, y, self.valid.x, self.valid.y, FIXED, 0)
         self.classes_ = np.array([0, 1])
         return self
 
@@ -45,7 +46,7 @@ class OutcomeModel(ClassifierMixin, BaseEstimator):
 def fit(train, valid, config, seed, trees):
     """Fit on `train` (a learners.Split); `config` holds min_samples_leaf and max_features."""
     forest = CausalForestDML(
-        model_y=OutcomeModel(valid.x, valid.y),
+        model_y=OutcomeModel(),
         model_t=LogisticRegression(),
         discrete_outcome=True,
         discrete_treatment=True,
@@ -56,7 +57,11 @@ def fit(train, valid, config, seed, trees):
         n_jobs=1,
         random_state=seed,
     )
-    return forest.fit(train.y, train.w, X=train.x)
+    OutcomeModel.valid = valid
+    try:
+        return forest.fit(train.y, train.w, X=train.x)
+    finally:
+        OutcomeModel.valid = None
 
 
 def effect(forest, x):

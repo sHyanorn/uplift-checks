@@ -9,6 +9,11 @@ or IPW scores of the rows.
 import numpy as np
 import pandas as pd
 
+# Imported here and not at the first call: shap, which causalml imports, keeps a caught ImportError,
+# and its traceback would hold the calling frames, with the first unit's arrays, for the rest of the run.
+from causalml.metrics import auuc_score, qini_score, rate_score
+from sklift.metrics import qini_auc_score, uplift_auc_score
+
 OWN = ("V2*", "V3", "V4", "V5", "V6", "V9", "V10", "V11")
 LIBRARY = ("V1", "V2", "V7", "V8", "V12", "V13")
 
@@ -161,9 +166,6 @@ def library_versions(score, w, y, perm):
     V4 does on every machine. scikit-uplift groups ties and gets the score itself, with the rows in
     file order; the frame given to causalml has the columns y, w and score.
     """
-    from causalml.metrics import auuc_score, qini_score, rate_score  # slow imports, needed here only
-    from sklift.metrics import qini_auc_score, uplift_auc_score
-
     rank = np.empty(len(score))
     rank[permuted_order(score, perm)] = np.arange(len(score), 0, -1)
     frame = pd.DataFrame({"y": y, "w": w, "score": rank})

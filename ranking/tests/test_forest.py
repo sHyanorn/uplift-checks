@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 import pytest
 
@@ -47,3 +49,10 @@ def test_settings_reach_econml(fitted):
     assert len(outcome) == 2 and all(isinstance(m, forest.OutcomeModel) for m in outcome)
     assert all(0 < m.booster_.best_iteration < 1000 for m in outcome)
     assert all(m.booster_.params["num_leaves"] == 63 and m.booster_.params["seed"] == 0 for m in outcome)
+
+
+def test_a_pickled_forest_holds_no_rows(data, fitted):
+    train, valid, _ = data
+    raw = pickle.dumps(fitted, protocol=5)
+    assert train.x.tobytes()[:4096] not in raw and valid.x.tobytes()[:4096] not in raw
+    assert np.array_equal(forest.effect(pickle.loads(raw), valid.x), forest.effect(fitted, valid.x))

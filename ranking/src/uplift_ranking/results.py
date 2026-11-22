@@ -45,11 +45,12 @@ def by_difference(seeds):
 def unit_outputs(unit, scores, w, y, mu0, mu1, groups, r_star, labels=True, replicates=resample.REPLICATES, processes=4):
     """`scores`: model -> five arrays (seeds 0 to 4) of predicted effects on the rows."""
     perm = np.random.default_rng([20261115, 4, unit]).permutation(len(w))
-    ranked = lambda s: [resample.Ranked(scores[m][s], w, y, mu0, mu1, perm) for m in P.MODELS]
-    seed0 = ranked(0)
+    ranked = lambda s: (resample.Ranked(scores[m][s], w, y, mu0, mu1, perm) for m in P.MODELS)
+    seed0 = list(ranked(0))
     point = resample.point_values(seed0)
-    diff = Differences(point, resample.replicate_values(seed0, groups, unit, replicates, processes),
-                       np.array([point] + [resample.point_values(ranked(s)) for s in range(1, 5)]))
+    resampled = resample.replicate_values(seed0, groups, unit, replicates, processes)
+    del seed0  # the workers needed all nine rankings; seeds 1 to 4 take one model's at a time
+    diff = Differences(point, resampled, np.array([point] + [resample.point_values(ranked(s)) for s in range(1, 5)]))
     library = {m: metrics.library_versions(scores[m][0], w, y, perm) for m in P.MODELS}
     values = {v: {m: float(point[k, column(v)]) for k, m in enumerate(P.MODELS)} for v in OWN}
     values |= {v: {m: library[m][v] for m in P.MODELS} for v in LIBRARY}

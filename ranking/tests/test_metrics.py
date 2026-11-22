@@ -279,3 +279,31 @@ def test_budget_value_follows_the_definition(levels):
             total += part / len(b) * sum(gamma[i] for i in b)
             taken += part
         assert m.budget_value(score, gamma, k) == pytest.approx(total / 300, abs=1e-12)
+
+
+RELEASE = """
+import weakref
+import numpy as np
+from uplift_ranking import metrics as m
+from uplift_ranking.synthetic import rct
+
+
+class Held:
+    pass
+
+
+def first_call(t, perm):
+    held = Held()
+    alive = weakref.ref(held)
+    m.library_versions(t.tau, t.w, t.y, perm)
+    return alive
+
+
+print(first_call(rct(2000, 0), np.random.default_rng(0).permutation(2000))() is None)
+"""
+
+
+def test_the_first_library_call_keeps_no_frame_of_its_caller():
+    """A frame kept after the first call would hold a whole unit's scores and rankings through the next unit."""
+    out = subprocess.run([sys.executable, "-W", "ignore", "-c", RELEASE], capture_output=True, text=True, check=True).stdout
+    assert out.splitlines()[-1] == "True"

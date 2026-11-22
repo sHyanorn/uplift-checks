@@ -10,17 +10,20 @@ files stay in the cache directory. Test rows are opened only inside `read ... go
 Every stage checks the package versions first: nothing is downloaded, written or fitted, and no test
 row is read, under other versions. Stop conditions of Section 10 raise Stop: a package version other
 than the registered ones, a missing or non-finite prediction of a frozen model, a cache directory
-above 25 GB, and in the block trial records that are not HEAD's or not on the remote's main branch.
+above 25 GB, a rehearsed read above MEMORY_LIMIT, and in the block trial records that are not HEAD's or
+not on the remote's main branch.
 """
 
 import argparse
 import datetime
 import hashlib
 import json
+import os
 import pickle
 import resource
 import secrets
 import subprocess
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +38,8 @@ REGISTRATION_SHA256 = "e223e6ca8688b3caec522d1911c3f0d8b2a9e50c47cde675be0f27e89
 UNITS = {"criteo": {1: "visit", 2: "conversion"}, "lazada": {3: "label"}, "hillstrom": {4: "visit"}}
 NON_DEEP = tuning.MODELS[:6]
 DISK_LIMIT = 25e9
+MEMORY_LIMIT = 12 * 2**30  # for the rehearsed read: 3 GiB under the 15 GiB of Section 11's container
+REHEARSAL_REPLICATES = 16  # one for each job of the four replicate workers
 TOKEN = "read token"
 
 
@@ -166,11 +171,14 @@ def outcome_predictions(unit, outcome_models, x, where):
             for name, b in outcome_models.items()}
 
 
-def predictions(unit, fits, outcome_models, x, where):
-    """Scores of every model at seeds 0 to 4 and the outcome models' predictions on the rows `x`."""
-    scores = {model: [finite(f"unit {unit} {model} seed {s} on {where} rows", effect(model, f, x), len(x))
-                      for s, f in enumerate(fits[model])] for model in tuning.MODELS}
-    return scores, outcome_predictions(unit, outcome_models, x, where)
+def frozen_predictions(unit, frozen, x, where):
+    """Scores of the unit's frozen models at seeds 0 to 4 and its outcome models' predictions on the rows `x`,
+    with one model file in memory at a time."""
+    load = lambda name: (Path(frozen) / f"{unit} {name}.pkl").read_bytes()
+    scores = {model: [finite(f"unit {unit} {model} seed {s} on {where} rows",
+                             effect(model, thaw(load(f"{model} seed {s}")), x), len(x)) for s in range(5)]
+              for model in tuning.MODELS}
+    return scores, outcome_predictions(unit, pickle.loads(load("outcome models")), x, where)
 
 
 def check_nuisances(unit, m, e):
@@ -275,6 +283,74 @@ def evaluate(unit, scores, mu, rows, r_star, replicates, labels):
     return out
 
 
+def outputs(dataset, frozen, manifest, rows, where, replicates):
+    """Every registered output of the dataset from its frozen models on `rows` (outcome -> Split), one unit
+    at a time: a unit's scores and rankings are released before the next unit's are made."""
+    out = {}
+    for unit, outcome in UNITS[dataset].items():
+        scores, mu = frozen_predictions(unit, frozen, rows[outcome].x, where)
+        out[unit] = evaluate(unit, scores, mu, rows[outcome], manifest["R*"][str(unit)], replicates, labels=unit != 2)
+    return out
+
+
+def tree_memory():
+    """Bytes held by this process and its children: the sum of their proportional set sizes, since the forked
+    replicate workers share most of their pages with this process."""
+    me, kilobytes = os.getpid(), 0
+    for process in Path("/proc").iterdir():
+        try:
+            if process.name == str(me) or (process.name.isdigit() and
+                                           int((process / "stat").read_text().rsplit(")", 1)[1].split()[1]) == me):
+                kilobytes += sum(int(line.split()[1]) for line in (process / "smaps_rollup").read_text().splitlines()
+                                 if line.startswith("Pss:"))
+        except OSError:  # a process that ended after it was listed
+            pass
+    return kilobytes * 1024
+
+
+class PeakMemory(threading.Thread):
+    """The largest `tree_memory` seen, sampled twice a second inside a `with` block."""
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.peak, self.done = 0, threading.Event()
+
+    def run(self):
+        while not self.done.wait(0.5):
+            self.peak = max(self.peak, tree_memory())
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *error):
+        self.done.set()
+        self.join()
+
+
+def stand_in(valid, rows, unit):
+    """`rows` synthetic rows in place of a unit's test rows. Each feature is drawn on its own from the validation
+    rows' values, so feature vectors hardly repeat and tie blocks are no larger than among test rows; (w, y)
+    are drawn as pairs."""
+    rng = np.random.default_rng([20261115, 7, unit])
+    x = np.column_stack([rng.choice(valid.x[:, j], rows) for j in range(valid.x.shape[1])])
+    pairs = rng.choice(len(valid.y), rows)
+    return Split(x, valid.w[pairs], valid.y[pairs])
+
+
+def rehearse(dataset, frozen, manifest, valid, rows):
+    """Run the read's evaluation on synthetic rows of the test size and return its peak memory in bytes, this
+    process and its workers together; Stop (Section 10) above MEMORY_LIMIT. No token exists yet."""
+    synthetic = {outcome: stand_in(valid[outcome], rows, unit) for unit, outcome in UNITS[dataset].items()}
+    with PeakMemory() as memory:
+        outputs(dataset, frozen, manifest, synthetic, "synthetic", REHEARSAL_REPLICATES)
+    peak = max(memory.peak, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024)
+    if peak > MEMORY_LIMIT:
+        raise Stop(f"the read rehearsed on {rows} synthetic rows took {peak / 2**30:.2f} GiB of memory, "
+                   f"more than {MEMORY_LIMIT / 2**30:g} GiB")
+    return peak
+
+
 class EntryRefused(RuntimeError):
     pass
 
@@ -306,7 +382,8 @@ def entries(text, dataset):
 
 
 def prepare(dataset, repo, frozen, records_dir, out=ROOT / "results"):
-    """Write the read entry (UTC time, commit, manifest hash, token hash) for the operator to commit and push.
+    """Rehearse the read on synthetic rows of the test size, then write the read entry (UTC time, commit, manifest
+    hash, token hash, the rehearsal's peak memory) for the operator to commit and push.
 
     The token itself goes to the frozen directory, outside the repository; `go` uses it once. A second
     `go`, a lost container or a restart after `go` began finds no token, so a rerun needs a line in
@@ -321,10 +398,16 @@ def prepare(dataset, repo, frozen, records_dir, out=ROOT / "results"):
         amended = earlier[-1]["time"] in repo.committed(ROOT / "AMENDMENTS.md")
         if results_committed or not amended:
             raise EntryRefused("the dataset has a read entry; only an interrupted read recorded in AMENDMENTS.md may rerun")
+    d = data.load(dataset)
+    valid, rows = d.valid, len(d.test)
+    del d  # the training rows are not used here, and the read does not hold them either
+    manifest = json.loads(repo.committed(Path(records_dir) / f"{dataset}-manifest.json"))
+    peak = rehearse(dataset, frozen, manifest, valid, rows)
     token = secrets.token_hex(32)
     entry = {"dataset": dataset, "time": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
              "commit": repo.head(), "manifest": manifest_hash, "token": hashlib.sha256(token.encode()).hexdigest(),
-             "rerun": bool(earlier), "second read": bool(earlier) and earlier[0]["manifest"] != manifest_hash}
+             "rerun": bool(earlier), "second read": bool(earlier) and earlier[0]["manifest"] != manifest_hash,
+             "rehearsal GiB": round(peak / 2**30, 2)}
     (Path(frozen) / TOKEN).write_text(token)
     with reads.open("a") as f:
         f.write(json.dumps(entry) + "\n")
@@ -351,24 +434,18 @@ def go(dataset, repo, frozen, records_dir, out=ROOT / "results", replicates=None
         raise EntryRefused("this machine holds no unused token of the last read entry; a rerun needs its own entry")
     manifest = json.loads(repo.committed(Path(records_dir) / f"{dataset}-manifest.json"))
     d = data.load(dataset)
-    frozen_set = {}
+    valid, test = d.valid, d.test
+    del d  # the training rows are not used here
     for unit, outcome in UNITS[dataset].items():
-        load = lambda name: (Path(frozen) / f"{unit} {name}.pkl").read_bytes()
-        fits = {model: [thaw(load(f"{model} seed {s}")) for s in range(5)] for model in tuning.MODELS}
-        outcome_models, nuisance = pickle.loads(load("outcome models")), pickle.loads(load("nuisances"))
-        valid = d.valid[outcome].x
-        predictions(unit, fits, outcome_models, valid, "validation")
-        check_nuisances(unit, nuisance.predict("m", valid), nuisance.propensity(valid))
-        frozen_set[unit] = fits, outcome_models
+        x = valid[outcome].x
+        frozen_predictions(unit, frozen, x, "validation")
+        nuisance = pickle.loads((Path(frozen) / f"{unit} nuisances.pkl").read_bytes())
+        check_nuisances(unit, nuisance.predict("m", x), nuisance.propensity(x))
+    del valid, x
     token.unlink()
     opened = data.OPEN.set(True)
     try:
-        test, _ = d.test.open()
-        out_all = {}
-        for unit, outcome in UNITS[dataset].items():
-            scores, mu = predictions(unit, *frozen_set[unit], test[outcome].x, "test")
-            out_all[unit] = evaluate(unit, scores, mu, test[outcome], manifest["R*"][str(unit)], replicates,
-                                     labels=unit != 2)
+        out_all = outputs(dataset, frozen, manifest, test.open()[0], "test", replicates)
     finally:
         data.OPEN.reset(opened)
     out_all |= {"versions": installed, "resources": resources(frozen), "commit": repo.head(),

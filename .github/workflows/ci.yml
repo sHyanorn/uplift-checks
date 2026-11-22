@@ -17,6 +17,8 @@ jobs:
         working-directory: ranking
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the tests look for the registration commit
       - name: Install uv
         run: pipx install uv==0.11.32
       - name: Install the locked environment

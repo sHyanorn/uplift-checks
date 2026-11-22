@@ -1,7 +1,9 @@
 import hashlib
 import json
 import multiprocessing
+import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -39,28 +41,23 @@ class Constant:
 
 
 class FakeRepository:
-    """What has been committed and pushed, held in memory: no git commits in tests."""
+    """What has been committed and pushed, held in memory; the tests of run.Repository use git itself."""
 
     def __init__(self):
-        self.files, self.is_clean, self.is_pushed, self.history = {}, True, True, {"c-registration", "c-head"}
-        self.registration = {commit: run.REGISTRATION.read_bytes() for commit in ("c-registration", "HEAD")}
+        self.files, self.is_clean, self.is_pushed = {}, True, True
+        self.history = {run.REGISTRATION_COMMIT, "c-head"}
+        self.registration = {commit: run.REGISTRATION.read_bytes() for commit in (run.REGISTRATION_COMMIT, "HEAD")}
 
     def head(self):
         return "c-head"
 
-    def added(self, path):
-        return "c-registration"
-
     def blob(self, commit, path):
         return self.registration.get(commit) if Path(path) == run.REGISTRATION else None
-
-    def is_ancestor(self, a, b):
-        return a in self.history
 
     def contains(self, commit):
         return commit in self.history
 
-    def clean(self):
+    def clean(self, *written):
         return self.is_clean
 
     def committed(self, path):
@@ -84,7 +81,9 @@ def staged(tmp_path_factory):
     d = hillstrom_like()
     patch.setattr(data, "load", lambda name: d)
     records = tmp / "records" / "trials.jsonl"
-    run.search("hillstrom", records, commit="c-head")
+    sizes = {TEST: len(d.test), VALIDATION: len(d.valid["visit"].y), TRAINING: len(d.train["visit"].y)}
+    data.check_role_counts("hillstrom", np.repeat(list(sizes), list(sizes.values())), None, records.parent)  # as the first search does
+    run.search("hillstrom", FakeRepository(), records)
     configs, disagreements = run.select("hillstrom", records)
     chosen = {"configs": configs, "records commit": "c-head"}
     manifest = run.block("hillstrom", chosen, records, tmp / "frozen", tmp / "results", replicates=20)
@@ -99,7 +98,7 @@ def test_search_writes_one_record_per_trial(staged):
     rows = tuning.read(records)
     assert len(rows) == 5 * 2 + 9 + 3 * 2 and staged[5] == []
     assert all(tuple(r) == tuning.FIELDS for r in rows)
-    run.search("hillstrom", records, commit="c-head")  # resumes: nothing pending
+    run.search("hillstrom", FakeRepository(), records)  # resumes: nothing pending
     assert len(tuning.read(records)) == len(rows)
 
 
@@ -112,18 +111,34 @@ def test_refits_reproduce_the_manifest(staged):
     assert dry["versions"] == versions.check() and dry["resources"]["cache GB"] > 0
 
 
-def test_selection_reads_committed_records_only(staged):
+def test_selection_reads_committed_files_only(staged):
     _, _, records, *_ = staged
+    roles = records.parent / "hillstrom-roles.json"
     repo = FakeRepository()
-    with pytest.raises(run.Stop, match="differ from HEAD"):
+    repo.commit(roles)
+    with pytest.raises(run.Stop, match="trials.jsonl differs from HEAD"):
         run.choose("hillstrom", repo, records)
     repo.commit(records)
+    del repo.files[str(roles.resolve())]  # Section 2.1: the block does not take role counts that no commit holds
+    with pytest.raises(run.Stop, match="hillstrom-roles.json differs from HEAD"):
+        run.choose("hillstrom", repo, records)
+    repo.commit(roles)
     repo.is_pushed = False
     with pytest.raises(run.Stop, match="remote"):
         run.choose("hillstrom", repo, records)
     repo.is_pushed = True
     chosen, _ = run.choose("hillstrom", repo, records)
     assert chosen == {"configs": run.select("hillstrom", records)[0], "records commit": "c-head"}
+
+
+def test_the_search_and_the_block_refuse_uncommitted_files(staged):
+    _, _, records, *_ = staged
+    repo = FakeRepository()
+    repo.commit(records, records.parent / "hillstrom-roles.json")
+    repo.is_clean = False
+    for stage in (run.search, run.choose):
+        with pytest.raises(run.Stop, match="uncommitted files"):
+            stage("hillstrom", repo, records)
 
 
 def rewritten(staged, tmp_path, change):
@@ -170,7 +185,7 @@ def test_the_block_stops(staged, problem, monkeypatch, tmp_path):
 def read_setup(staged):
     d, tmp, records, *_ = staged
     repo = FakeRepository()
-    repo.commit(records.parent / "hillstrom-manifest.json")
+    repo.commit(records.parent / "hillstrom-manifest.json", records.parent / "hillstrom-roles.json", tmp / "results" / "hillstrom-dry-run.json")
     (records.parent / "reads.jsonl").unlink(missing_ok=True)
     (tmp / "frozen" / run.TOKEN).unlink(missing_ok=True)
     (tmp / "results" / "hillstrom.json").unlink(missing_ok=True)
@@ -221,8 +236,10 @@ REFUSALS = {
     "registration": "not an ancestor",
     "registration missing at HEAD": "registration at HEAD",
     "registration changed at HEAD": "registration at HEAD",
-    "registration changed when added": "registration at c-registration",
+    "registration changed when added": "registration at 9e8678d",
     "dirty": "not clean",
+    "no dry run": "hillstrom-dry-run.json is not committed",
+    "no role counts": "hillstrom-roles.json is not committed",
     "frozen": "differs from the manifest",
     "no manifest": "no committed manifest",
     "not pushed": "remote",
@@ -234,13 +251,13 @@ def test_the_entry_point_refuses(staged, problem):
     d, tmp, records_dir, repo = read_setup(staged)
     frozen = tmp / "frozen"
     if problem == "registration":
-        repo.history.discard("c-registration")
+        repo.history.discard(run.REGISTRATION_COMMIT)
     elif problem == "registration missing at HEAD":
         del repo.registration["HEAD"]
     elif problem == "registration changed at HEAD":
         repo.registration["HEAD"] += b"\n"
     elif problem == "registration changed when added":
-        repo.registration["c-registration"] = repo.registration["c-registration"].replace(b"20261115", b"20261116", 1)
+        repo.registration[run.REGISTRATION_COMMIT] = repo.registration["HEAD"].replace(b"20261115", b"20261116", 1)
     elif problem == "dirty":
         repo.is_clean = False
     elif problem == "frozen":
@@ -249,8 +266,9 @@ def test_the_entry_point_refuses(staged, problem):
         for f in (tmp / "frozen").glob("*.pkl"):
             (frozen / f.name).write_bytes(f.read_bytes())
         (frozen / "4 S seed 0.pkl").write_bytes(b"changed")
-    elif problem == "no manifest":
-        repo.files.clear()
+    elif problem.startswith("no "):
+        name = {"no dry run": "hillstrom-dry-run.json", "no role counts": "hillstrom-roles.json", "no manifest": "hillstrom-manifest.json"}
+        del repo.files[next(path for path in repo.files if path.endswith(name[problem]))]
     if problem == "not pushed":
         run.prepare("hillstrom", repo, frozen, records_dir, tmp / "results")
         repo.commit(records_dir / "reads.jsonl")
@@ -262,12 +280,62 @@ def test_the_entry_point_refuses(staged, problem):
         run.prepare("hillstrom", repo, frozen, records_dir, tmp / "results")
 
 
-def test_the_repository_holds_the_registered_text():
+def test_the_repository_holds_the_registration_commit():
+    """On the repository itself, with its whole history (the CI checkout fetches it)."""
     repo = run.Repository()
-    added = repo.added(run.REGISTRATION)
-    assert added and repo.is_ancestor(added, repo.head())
-    for text in (repo.blob(added, run.REGISTRATION), repo.blob("HEAD", run.REGISTRATION), run.REGISTRATION.read_bytes()):
+    assert repo.contains(run.REGISTRATION_COMMIT)
+    added = repo.git("diff-tree", "--root", "--no-commit-id", "--name-status", "-r", run.REGISTRATION_COMMIT).stdout
+    assert added == "A\tranking/PREREGISTRATION.md\n"
+    for text in (repo.blob(run.REGISTRATION_COMMIT, run.REGISTRATION), repo.blob("HEAD", run.REGISTRATION), run.REGISTRATION.read_bytes()):
         assert hashlib.sha256(text).hexdigest() == run.REGISTRATION_SHA256
+
+
+def git(cwd, *args):
+    identity = {f"GIT_{who}_{what}": value for who in ("AUTHOR", "COMMITTER") for what, value in (("NAME", "test"), ("EMAIL", "test@example.invalid"))}
+    subprocess.run(["git", *args], cwd=cwd, env=os.environ | identity, check=True, capture_output=True)
+
+
+def test_a_history_without_the_registration_commit_is_refused(tmp_path):
+    """A shallow clone holds the registered text at HEAD, added there for all it can show."""
+    git(tmp_path, "clone", "--depth", "1", f"file://{run.ROOT.parent}", "clone")
+    root = tmp_path / "clone" / "ranking"
+    assert hashlib.sha256((root / "PREREGISTRATION.md").read_bytes()).hexdigest() == run.REGISTRATION_SHA256
+    with pytest.raises(run.EntryRefused, match="not an ancestor"):
+        run.entry_checks("hillstrom", run.Repository(root), tmp_path, root / "records", root / "results")
+
+
+@pytest.fixture
+def clone(tmp_path):
+    """The ranking directory of a clone whose one commit is on the main branch of its remote."""
+    git(tmp_path, "init", "--bare", "--initial-branch=main", "remote.git")
+    git(tmp_path, "clone", "remote.git", "clone")
+    root = tmp_path / "clone" / "ranking"
+    (root / "records").mkdir(parents=True)
+    (root / "code.py").write_text("")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "first")
+    git(root, "push", "origin", "HEAD:main")
+    return root
+
+
+def test_pushed_asks_the_remote(clone):
+    repo = run.Repository(clone)
+    assert repo.pushed()
+    (clone / "code.py").write_text("x = 1\n")
+    git(clone, "commit", "-am", "second")
+    git(clone, "update-ref", "refs/remotes/origin/main", "HEAD")  # the local copy of the remote's branch, moved without a push
+    assert not repo.pushed()
+    git(clone, "push", "origin", "HEAD:main")
+    assert repo.pushed()
+
+
+def test_clean_leaves_aside_the_named_directories_only(clone):
+    repo = run.Repository(clone)
+    assert repo.clean()
+    (clone / "records" / "trials.jsonl").write_text("{}\n")
+    assert repo.clean(clone / "records") and not repo.clean() and not repo.clean(clone / "results")
+    (clone / "code.py").write_text("x = 1\n")
+    assert not repo.clean(clone / "records")
 
 
 def test_a_lost_container_needs_a_new_entry(staged):
@@ -414,7 +482,7 @@ def test_each_stage_checks_the_versions_before_it_loads_the_data(staged, stage, 
 
     monkeypatch.setattr(data, "load", load)
     monkeypatch.setattr(versions, "installed", lambda: dict(versions.PINNED, torch="2.15.0"))
-    stages = {"search": lambda: run.search("hillstrom", tmp_path / "trials.jsonl"),
+    stages = {"search": lambda: run.search("hillstrom", repo, tmp_path / "trials.jsonl"),
               "block": lambda: run.block("hillstrom", chosen, tmp_path / "trials.jsonl", tmp_path / "frozen", tmp_path / "results", 20),
               "read": lambda: run.go("hillstrom", repo, tmp / "frozen", records_dir, tmp / "results", replicates=20)}
     with pytest.raises(versions.VersionMismatch, match="torch"):

@@ -10,8 +10,8 @@ files stay in the cache directory. Test rows are opened only inside `read ... go
 Every stage checks the package versions first: nothing is downloaded, written or fitted, and no test
 row is read, under other versions. Stop conditions of Section 10 raise Stop: a package version other
 than the registered ones, a missing or non-finite prediction of a frozen model, a cache directory
-above 25 GB, a rehearsed read above MEMORY_LIMIT, and in the block trial records that are not HEAD's or
-not on the remote's main branch.
+above 25 GB, a rehearsed read above MEMORY_LIMIT, uncommitted files in the search or the block, and in
+the block trial records or role counts that are not HEAD's or not on the remote's main branch.
 """
 
 import argparse
@@ -35,6 +35,7 @@ from .roles import groups
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRATION = ROOT / "PREREGISTRATION.md"
 REGISTRATION_SHA256 = "e223e6ca8688b3caec522d1911c3f0d8b2a9e50c47cde675be0f27e89838b6b1"
+REGISTRATION_COMMIT = "9e8678d0efc03ba51aaa8e2cc7718e993db5e412"  # adds the registration and nothing else
 UNITS = {"criteo": {1: "visit", 2: "conversion"}, "lazada": {3: "label"}, "hillstrom": {4: "visit"}}
 NON_DEEP = tuning.MODELS[:6]
 DISK_LIMIT = 25e9
@@ -59,11 +60,6 @@ class Repository:
     def head(self):
         return self.git("rev-parse", "HEAD").stdout.strip()
 
-    def added(self, path):
-        """The earliest commit in HEAD's history that added the file, or '' if none did."""
-        commits = self.git("log", "--diff-filter=A", "--format=%H", "--", str(Path(path).resolve())).stdout.split()
-        return commits[-1] if commits else ""
-
     def blob(self, commit, path):
         """The file's bytes at the commit, or None if it is not there."""
         out = subprocess.run(["git", "show", f"{commit}:{self.name(path)}"], cwd=self.root, capture_output=True)
@@ -76,8 +72,10 @@ class Repository:
     def is_ancestor(self, a, b):
         return self.git("merge-base", "--is-ancestor", a, b, check=False).returncode == 0
 
-    def clean(self):
-        return self.git("status", "--porcelain").stdout == ""
+    def clean(self, *written):
+        """No uncommitted change, leaving aside the directories `written`, where the steps write their files."""
+        aside = [f":(top,exclude){self.name(directory)}" for directory in written]
+        return self.git("status", "--porcelain", "--", ":(top)", *aside).stdout == ""
 
     def committed(self, path):
         """The file's content at HEAD, or '' if it is not there."""
@@ -88,7 +86,9 @@ class Repository:
         return self.is_ancestor(commit, "HEAD")
 
     def pushed(self):
-        return self.is_ancestor("HEAD", "origin/main")
+        """HEAD is on the remote's main branch as the remote has it now (Section 11), not as last fetched."""
+        self.git("fetch", "origin", "main")
+        return self.is_ancestor("HEAD", "FETCH_HEAD")
 
 
 def two_arms(split, unit):
@@ -96,9 +96,24 @@ def two_arms(split, unit):
     return Split(split.x, (split.w > 0).astype(np.int64), split.y) if unit == 4 else split
 
 
-def search(dataset, records=tuning.RECORDS, commit="", models=tuning.MODELS):
+def role_counts(dataset, records_dir):
+    """The file of role counts that the dataset's first search writes (Section 2.1), in a list; empty where the
+    registration fixes the counts."""
+    return [Path(records_dir) / f"{dataset}-roles.json"] if data.EXPECTED[dataset]["roles"] is None else []
+
+
+def committed_code(repo, records):
+    """Stop unless every file outside records/ and results/ is committed: a record's commit then holds the code
+    that wrote it, and the next step starts from committed files."""
+    if not repo.clean(Path(records).parent, ROOT / "results"):
+        raise Stop("uncommitted files outside records/ and results/; commit them first")
+
+
+def search(dataset, repo, records=tuning.RECORDS, models=tuning.MODELS):
     """Seed-0 trials without a record; stops if m-hat and e differ from the unit's first record."""
     versions.check()
+    committed_code(repo, records)
+    commit = repo.head()
     d = data.load(dataset)
     for unit, outcome in UNITS[dataset].items():
         train, valid = two_arms(d.train[outcome], unit), two_arms(d.valid[outcome], unit)
@@ -121,19 +136,23 @@ def select(dataset, records=tuning.RECORDS):
 
 
 def choose(dataset, repo, records=tuning.RECORDS):
-    """Selection from committed records only (Sections 4 and 11): the records file must be HEAD's, and
-    HEAD on the remote's main branch; HEAD is then the records commit of the frozen set.
+    """Selection from committed files only (Sections 4 and 11): the trial records and, on Hillstrom, the role counts
+    (Section 2.1) must be HEAD's, and HEAD on the remote's main branch; HEAD is then the records commit of the
+    frozen set.
 
     Once the dataset has a committed read entry, the block reruns with the configurations, R* and records
     commit of the committed manifest (Section 11), so that refits that reproduce the frozen files reproduce
     the manifest hash."""
     records = Path(records)
-    if entries(repo.committed(records.parent / "reads.jsonl"), dataset):
+    committed_code(repo, records)
+    rerun = bool(entries(repo.committed(records.parent / "reads.jsonl"), dataset))
+    for path in role_counts(dataset, records.parent) + ([] if rerun else [records]):
+        if not path.exists() or path.read_text() != repo.committed(path):
+            raise Stop(f"{path.name} differs from HEAD's; commit and push it before the block")
+    if rerun:
         manifest = json.loads(repo.committed(records.parent / f"{dataset}-manifest.json"))
         return {"configs": {int(u): c for u, c in manifest["configs"].items()}, "records commit": manifest["records commit"],
                 "R*": {int(u): r for u, r in manifest["R*"].items()}}, []
-    if not records.exists() or records.read_text() != repo.committed(records):
-        raise Stop("the trial records differ from HEAD's; commit and push them before the block")
     if not repo.pushed():
         raise Stop("HEAD is not on the main branch of the remote")
     configs, disagreements = select(dataset, records)
@@ -360,18 +379,21 @@ class EntryRefused(RuntimeError):
     pass
 
 
-def entry_checks(dataset, repo, frozen, records_dir):
-    """Section 10: the registered text in the commit that added it, an ancestor of HEAD, and at HEAD; a clean
-    tree; frozen files as in the committed manifest."""
-    added = repo.added(REGISTRATION)
-    if not added or not repo.is_ancestor(added, repo.head()):
+def entry_checks(dataset, repo, frozen, records_dir, out):
+    """Section 10: the registration commit an ancestor of HEAD, and the registered text in it and at HEAD; a clean
+    tree; frozen files as in the committed manifest. Also committed: the dry run (Section 11) and, on Hillstrom,
+    the role counts (Section 2.1)."""
+    if not repo.contains(REGISTRATION_COMMIT):
         raise EntryRefused("the registration commit is not an ancestor of HEAD")
-    for commit in (added, "HEAD"):
+    for commit in (REGISTRATION_COMMIT, "HEAD"):
         text = repo.blob(commit, REGISTRATION)
         if text is None or hashlib.sha256(text).hexdigest() != REGISTRATION_SHA256:
-            raise EntryRefused(f"the registration at {commit} is missing or not the registered text")
+            raise EntryRefused(f"the registration at {commit[:7]} is missing or not the registered text")
     if not repo.clean():
         raise EntryRefused("the working tree is not clean")
+    for path in [Path(out) / f"{dataset}-dry-run.json", *role_counts(dataset, records_dir)]:
+        if not repo.committed(path):
+            raise EntryRefused(f"{path.name} is not committed")
     manifest = repo.committed(Path(records_dir) / f"{dataset}-manifest.json")
     if not manifest:
         raise EntryRefused("no committed manifest")
@@ -395,7 +417,7 @@ def prepare(dataset, repo, frozen, records_dir, out=ROOT / "results"):
     AMENDMENTS.md and a new entry (Sections 10 and 11). A manifest other than the first entry's (refits that
     do not reproduce it) makes the entry a second read."""
     versions.check()
-    manifest_hash = entry_checks(dataset, repo, frozen, records_dir)
+    manifest_hash = entry_checks(dataset, repo, frozen, records_dir, out)
     reads = Path(records_dir) / "reads.jsonl"
     earlier = entries(repo.committed(reads), dataset)
     if earlier:
@@ -426,7 +448,7 @@ def go(dataset, repo, frozen, records_dir, out=ROOT / "results", replicates=None
     The results name HEAD, the commit that holds the read entry, and the command that computed them there
     (Section 15), and say whether they come from a second read (Section 10)."""
     installed = versions.check()
-    manifest_hash = entry_checks(dataset, repo, frozen, records_dir)
+    manifest_hash = entry_checks(dataset, repo, frozen, records_dir, out)
     committed = entries(repo.committed(Path(records_dir) / "reads.jsonl"), dataset)
     if not committed or committed[-1]["manifest"] != manifest_hash or not repo.contains(committed[-1]["commit"]):
         raise EntryRefused("no committed read entry for this manifest")
@@ -478,7 +500,7 @@ def main():
     a = arguments()
     repo, frozen, records_dir = Repository(), data.CACHE / a.dataset / "frozen", tuning.RECORDS.parent
     if a.stage == "search":
-        search(a.dataset, commit=repo.head(), models=a.model or tuning.MODELS)
+        search(a.dataset, repo, models=a.model or tuning.MODELS)
     elif a.stage == "block":
         chosen, disagreements = choose(a.dataset, repo)
         print(json.dumps({"disagreements": disagreements}))

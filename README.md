@@ -29,7 +29,7 @@ None yet. Each dataset's test rows are read once (an interrupted read aside, see
 
 ## How to rerun
 
-This needs Linux on x86-64, Python 3.13, uv 0.11.32, a clone whose remote `origin` is a repository you can push to, with a `main` branch, disk for the downloads and the environment, and up to 25 GB per dataset for the frozen models, above which `block` stops. Each stage first checks Python and the package versions of Section 12, and stops on any other version before it downloads data, fits a model or reads a test row. From `ranking/`:
+This needs Linux on x86-64, Python 3.13, uv 0.11.32, a full clone (the read refuses a history without the registration commit) whose remote `origin` is a repository you can push to, with a `main` branch, 15 GiB of memory, disk for the downloads and the environment, and up to 25 GB per dataset for the frozen models, above which `block` stops. Each stage first checks Python and the package versions of Section 12, and stops on any other version before it downloads data, fits a model or reads a test row. From `ranking/`:
 
 ```
 uv sync --locked --group test

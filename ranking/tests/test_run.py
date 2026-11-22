@@ -77,7 +77,7 @@ def staged(tmp_path_factory):
     patch = pytest.MonkeyPatch()
     patch.setattr(tuning, "BUDGET", 2)
     patch.setattr(forest, "SEARCH_TREES", 8)
-    patch.setattr(forest, "FINAL_TREES", 8)
+    patch.setattr(forest, "FINAL_TREES", 12)
     d = hillstrom_like()
     patch.setattr(data, "load", lambda name: d)
     records = tmp / "records" / "trials.jsonl"
@@ -147,6 +147,17 @@ def rewritten(staged, tmp_path, change):
     change(rows)
     (tmp_path / "trials.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     return tmp_path / "trials.jsonl", rows
+
+
+def test_the_search_stops_on_records_of_other_nuisances(staged, tmp_path):
+    def change(rows):
+        for r in rows:
+            r["fingerprint"] = "of another machine"
+
+    records, rows = rewritten(staged, tmp_path, change)
+    with pytest.raises(tuning.FingerprintMismatch, match="unit 4"):
+        run.search("hillstrom", FakeRepository(), records)
+    assert tuning.read(records) == rows
 
 
 def test_selection_stops_on_records_under_two_fingerprints(staged, tmp_path):
@@ -524,6 +535,18 @@ def test_thawed_deep_models_predict_under_the_registered_torch_settings(staged):
     torch.use_deterministic_algorithms(False)
     run.thaw((tmp / "frozen" / "4 EFIN seed 0.pkl").read_bytes())
     assert torch.get_num_threads() == deep.THREADS and torch.are_deterministic_algorithms_enabled()
+
+
+def test_final_forests_take_the_final_size_and_on_criteo_the_drawn_rows(staged, monkeypatch):
+    _, tmp, *_ = staged
+    assert run.thaw((tmp / "frozen" / "4 causal forest seed 0.pkl").read_bytes()).n_estimators == forest.FINAL_TREES != forest.SEARCH_TREES
+    train, seen = Split(np.arange(20.0).reshape(10, 2), np.arange(10), np.arange(10)), {}
+    monkeypatch.setattr(forest, "criteo_rows", lambda: np.array([1, 4, 7]))
+    monkeypatch.setattr(forest, "fit", lambda t, v, config, seed, trees: seen.update(rows=t.y.tolist(), trees=trees))
+    run.fit_final("causal forest", {}, train, None, 0, "criteo", 500)
+    assert seen == {"rows": [1, 4, 7], "trees": 500}
+    run.fit_final("causal forest", {}, train, None, 0, "lazada", 500)
+    assert seen["rows"] == list(range(10))
 
 
 def test_stand_in_rows_take_their_values_from_the_validation_rows(staged):

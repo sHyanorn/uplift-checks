@@ -47,8 +47,9 @@ class Recorder:
     value = 0.4
 
     def __init__(self, x, target, valid_x, valid_target, config, seed, objective="binary", weight=None, valid_weight=None):
-        self.rows = {r.tobytes() for r in x}
+        self.rows, self.valid_rows = {r.tobytes() for r in x}, {r.tobytes() for r in valid_x}
         self.target, self.weight, self.valid_target, self.valid_weight = target, weight, valid_target, valid_weight
+        self.config, self.seed = config, seed
         self.best_iteration = 1
         self.objective = objective
         Recorder.log.append(self)
@@ -81,6 +82,30 @@ def test_outcome_models_pool_the_named_arms(monkeypatch):
     models = learners.outcome_models(Split(train.x, arms, train.y), Split(valid.x, arms[:1500], valid.y), {"mu0": [0], "mu1": [1, 2]})
     assert models["mu0"].rows == {r.tobytes() for r in train.x[arms == 0]}
     assert models["mu1"].rows == {r.tobytes() for r in train.x[arms > 0]}
+    # 5.3: early stopping on the validation rows of the same arms, the fixed settings and seed 0.
+    assert models["mu0"].valid_rows == {r.tobytes() for r in valid.x[arms[:1500] == 0]}
+    assert models["mu1"].valid_rows == {r.tobytes() for r in valid.x[arms[:1500] > 0]}
+    assert all((b.config, b.seed, b.objective) == (learners.FIXED, 0, "binary") for b in models.values())
+
+
+def test_the_fixed_settings_reach_lightgbm():
+    train, valid, _ = splits(2000, 9)
+    params = learners.outcome_models(train, valid, {"mu0": [0]})["mu0"].params
+    registered = {"num_leaves": 63, "learning_rate": 0.05, "min_child_samples": 100, "feature_fraction": 0.8,
+                  "bagging_fraction": 0.8, "bagging_freq": 1, "seed": 0, "deterministic": True, "force_row_wise": True, "num_threads": 4}
+    assert {name: params[name] for name in registered} == registered
+
+
+def test_boosting_stops_fifty_rounds_after_the_best_and_at_a_thousand_trees(monkeypatch):
+    train, _, _ = splits(1200, 10)
+    rounds, loss = [], learners.log_loss
+    monkeypatch.setattr(learners, "log_loss", lambda p, valid: rounds.append(1) or loss(p, valid))
+    unrelated = np.random.default_rng(0).integers(0, 2, 600)  # labels the features do not predict: the loss is best early
+    b = learners.booster(train.x[:600], train.y[:600], train.x[600:], unrelated, learners.FIXED, 0)
+    assert len(rounds) == b.best_iteration + 50 < 1000
+    rounds.clear()
+    b = learners.booster(train.x, train.y, train.x, train.y, learners.FIXED, 0)  # validated on its training rows: the loss keeps falling
+    assert len(rounds) == b.best_iteration == 1000
 
 
 def test_nuisances(imbalanced, selective):

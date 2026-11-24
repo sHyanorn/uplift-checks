@@ -5459,8 +5459,8 @@
     "V_D": 142.41308879668105,
     "gap": 0.0,
     "dual bound": 142.41308879668105,
-    "seconds exact": 0.8656131459997596,
-    "seconds dual": 0.009460483000111708,
+    "seconds exact": 0.8152459829980216,
+    "seconds dual": 0.009774463000212563,
     "bound ratio": 0.0017820977441107776,
     "label": "dual within 1e-4 of exact",
     "b1": {
@@ -5501,8 +5501,8 @@
     "V_D": 296.4283848406257,
     "gap": 0.0,
     "dual bound": 296.47835339006247,
-    "seconds exact": 8.818594192000091,
-    "seconds dual": 0.010416708999855473,
+    "seconds exact": 7.836187691002124,
+    "seconds dual": 0.00868987899957574,
     "bound ratio": 0.0008560289187201078,
     "label": "dual below exact",
     "b1": {
@@ -5543,8 +5543,8 @@
     "V_D": 402.11946247607307,
     "gap": 0.0,
     "dual bound": 402.11946247607307,
-    "seconds exact": 0.8589664259998244,
-    "seconds dual": 0.009664848999818787,
+    "seconds exact": 0.9178837590006879,
+    "seconds dual": 0.009873730999970576,
     "bound ratio": 0.0006311409119908352,
     "label": "dual within 1e-4 of exact",
     "b1": {
@@ -5585,8 +5585,8 @@
     "V_D": 92.92622606213864,
     "gap": 0.0,
     "dual bound": 92.92622606213864,
-    "seconds exact": 1.2076263950002613,
-    "seconds dual": 0.007165980000081618,
+    "seconds exact": 1.167047894999996,
+    "seconds dual": 0.009400891998666339,
     "bound ratio": 0.002731134740226125,
     "label": "dual within 1e-4 of exact",
     "b1": {
@@ -5627,8 +5627,8 @@
     "V_D": 229.2925103075197,
     "gap": 0.0,
     "dual bound": 229.29251030751973,
-    "seconds exact": 1.1629537260000689,
-    "seconds dual": 0.007998015999874042,
+    "seconds exact": 1.3033558059978532,
+    "seconds dual": 0.009102015999815194,
     "bound ratio": 0.0011068571055200748,
     "label": "dual within 1e-4 of exact",
     "b1": {
@@ -5669,8 +5669,8 @@
     "V_D": 337.7604671014874,
     "gap": 0.0,
     "dual bound": 337.7604671014874,
-    "seconds exact": 1.3153173700002299,
-    "seconds dual": 0.013255244999982096,
+    "seconds exact": 1.286648426001193,
+    "seconds dual": 0.011187652002263349,
     "bound ratio": 0.000751402455279514,
     "label": "dual within 1e-4 of exact",
     "b1": {
@@ -5711,8 +5711,8 @@
     "V_D": 84.64009399334947,
     "gap": 0.0,
     "dual bound": 84.64009399334947,
-    "seconds exact": 0.6949166589997731,
-    "seconds dual": 0.00827460800019253,
+    "seconds exact": 0.8836862719981582,
+    "seconds dual": 0.00712105299680843,
     "bound ratio": 0.002998508535403503,
     "label": "dual within 1e-4 of exact",
     "b1": {
@@ -5753,8 +5753,8 @@
     "V_D": 208.9612573804279,
     "gap": 0.0,
     "dual bound": 208.9612573804279,
-    "seconds exact": 0.6769203379999453,
-    "seconds dual": 0.007846988999972382,
+    "seconds exact": 0.6450347720019636,
+    "seconds dual": 0.009136243999819271,
     "bound ratio": 0.0012145507136491057,
     "label": "dual within 1e-4 of exact",
     "b1": {
@@ -5795,8 +5795,8 @@
     "V_D": 308.36761045526373,
     "gap": 0.0,
     "dual bound": 308.36761045526373,
-    "seconds exact": 0.8151743539997369,
-    "seconds dual": 0.01188064600000871,
+    "seconds exact": 0.9038942779989156,
+    "seconds dual": 0.01286364599945955,
     "bound ratio": 0.0008230243244474348,
     "label": "dual within 1e-4 of exact",
     "b1": {
@@ -5847,7 +5847,7 @@
  "resources": {
   "peak memory GB": {
    "process": 0.842,
-   "largest child": 0.599
+   "largest child": 0.602
   },
   "cache GB": 0.035
  }

@@ -1,6 +1,8 @@
 # Uplift checks
 
-A pre-registered study of how uplift models are compared, on three public randomised trials: Criteo Uplift v2.1, Lazada and Hillstrom. The registration, [`ranking/PREREGISTRATION.md`](ranking/PREREGISTRATION.md), fixes the questions, data, models, statistics and decision rules before any model is evaluated. "Section" below means a section of that file.
+A pre-registered study of how uplift models are compared, on three public datasets with randomised test sets: Criteo Uplift v2.1, Lazada and Hillstrom. The registration, [`ranking/PREREGISTRATION.md`](ranking/PREREGISTRATION.md), fixes the questions, data, models, statistics and decision rules before any model is evaluated. "Section" below means a section of that file.
+
+Lazada and Hillstrom have been read; Criteo has not been run. On both, H2 separates none of the 36 pairs, and H3 finds each deep model, as implemented here, "undecided" against the best non-deep one. On Lazada both literature groups are "most published gaps below the detectable difference" (H4).
 
 ## What it is
 
@@ -16,7 +18,15 @@ The repository holds the registration, the code, tests on synthetic data and, fr
 
 ## Results
 
-None yet. Each dataset's test rows are read once (an interrupted read aside, see How to rerun), after its models are frozen and a dry run on validation rows has computed every output; the dry run, in `ranking/results/DATASET-dry-run.json`, computes the labels (the outcomes of the decision rules of Sections 7 and 8), which enter no verdict (Section 4). The read writes `ranking/results/DATASET.json`: every label of Sections 7 and 8 with the statistics behind it, including the intervals and seed values that its rule reads, the package versions, the resource figures, `commit` (the commit that holds the read entry), `command` (the stage that computed the labels at that commit; Section 15) and `second read` (Section 10).
+Lazada and Hillstrom were each read once, on 2026-11-24, after read entries of 06:48 and 07:13 UTC (`ranking/records/reads.jsonl`); neither entry reruns an interrupted read or is a second read. Criteo has not been run: U1 and U2, the groups L1 Criteo, L2 and L4 and the published gains on U1 have no results.
+
+[`ranking/RESULTS.md`](ranking/RESULTS.md) describes what a read writes and tables every label of the two reads with its statistic and, for H3, H5 and H7, its interval. Figures are rounded to three significant figures here; R* is DR on both units.
+
+- Q1, H1. H1a is "no separated pair; 8 reversals of 36" on Lazada and "no separated pair; 1 reversals of 36" on Hillstrom, and the three H1b readings are "no separated pair; r reversals of 36" on both. Section 7 then makes no statement of agreement (H1a), and no change in the preferred model is shown (H1b).
+- Q2, H2. "mostly indistinguishable" on both units: N = 0 of 36 pairs, with a median `MDD_sim` over the family of 72 of 0.00152 on Lazada's 181,669 test rows and 0.00849 on Hillstrom's 25,775; the marginal (unadjusted) count is 0 on Lazada and 5 on Hillstrom.
+- Q2, H3. The result for TARNet, DESCN and EFIN, as implemented here, is "undecided" on both units: the V2* label of `M(D) - M(R*)`, read from the simultaneous 95% interval over the unit's family of 12 contrasts. That difference is 0.00557 [-0.0107, 0.0219], 0.00330 [-0.0139, 0.0205] and 0.000442 [-0.0156, 0.0164] on Lazada and 0.0145 [-0.0127, 0.0418], -0.00117 [-0.0296, 0.0273] and 0.0208 [-0.00736, 0.0489] on Hillstrom. Of the 24 contrasts, 23 are "undecided"; one, EFIN minus our T-learner under V2* on Hillstrom, is "gain shown": 0.0274 [0.000913, 0.0539]. It changes no result: a model's result reads only its contrasts with R*, and the label of a contrast with T is read only by the published-gain rule, and U4 has no published gain. On Lazada, DESCN's published gain is "published gain not tested at this size".
+- Q3, H4. The median MDD of the 36 pairs under V2* is 0.0268 on Lazada and 0.0262 on Hillstrom. 78 of 78 gaps in Table 4 of Liu et al. (2024) on Lazada, and 6 of 7 between DESCN and the other models in Table 2 of Zhong et al. (2022), are smaller than the difference that a test set of their size detects with 80% power (`MDD_L`, from our nine models' pairs: 0.0266 at 181,669 rows, 0.0119 at 910,000). Both groups are "most published gaps below the detectable difference".
+- Section 8, with marginal intervals in H5 and H7. Every H5 contrast with R* is "not distinguishable" (24 per unit, AIPW and IPW). All 9 H6 instances are Optimal with gap 0; 8 are "dual within 1e-4 of exact", and one (`c = 2`, `B` = 0.5 x test rows) is "dual below exact" (`|V_E - V_D| / V_E` = 0.000113 against 1e-4). Under the assumed costs only, the exact policy's estimated value is "higher" than a simple policy's in 5 of 18 comparisons, "lower" in 1 and "not distinguishable" in 12, under AIPW and IPW alike.
 
 ## Method
 
@@ -36,7 +46,7 @@ uv sync --locked --group test
 uv run --no-sync pytest -q
 ```
 
-The steps of each dataset's run, how an interrupted read is rerun, how the registration is amended and the files the runs write are in [`ranking/RERUN.md`](ranking/RERUN.md).
+The steps of each dataset's run, how an interrupted read is rerun, how the registration is amended and the files the runs write are in [`ranking/RERUN.md`](ranking/RERUN.md). The test rows of Lazada and Hillstrom are not read again: `go` refuses a dataset whose results are committed.
 
 ## Limits
 

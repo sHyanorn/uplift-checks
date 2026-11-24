@@ -1,0 +1,117 @@
+{
+ "R*": {
+  "3": "DR"
+ },
+ "comparisons": {
+  "3 DESCN": {
+   "R-loss": 0.01844089858386304,
+   "fingerprint matches": true,
+   "record R-loss": 0.01844089858386304
+  },
+  "3 DR": {
+   "R-loss": 0.01843973562409917,
+   "fingerprint matches": true,
+   "record R-loss": 0.01843973562409917
+  },
+  "3 EFIN": {
+   "R-loss": 0.018439557515547916,
+   "fingerprint matches": true,
+   "record R-loss": 0.018439557515547916
+  },
+  "3 R": {
+   "R-loss": 0.018441682236789072,
+   "fingerprint matches": true,
+   "record R-loss": 0.018441682236789072
+  },
+  "3 S": {
+   "R-loss": 0.018442302306138497,
+   "fingerprint matches": true,
+   "record R-loss": 0.018442302306138497
+  },
+  "3 T": {
+   "R-loss": 0.018449874620294435,
+   "fingerprint matches": true,
+   "record R-loss": 0.018449874620294435
+  },
+  "3 TARNet": {
+   "R-loss": 0.01844251568328505,
+   "fingerprint matches": true,
+   "record R-loss": 0.01844251568328505
+  },
+  "3 X": {
+   "R-loss": 0.0184425590935085,
+   "fingerprint matches": true,
+   "record R-loss": 0.0184425590935085
+  },
+  "3 causal forest": {
+   "R-loss": 0.01844313764453376,
+   "fingerprint matches": true,
+   "record R-loss": 0.01844306988585218
+  }
+ },
+ "configs": {
+  "3": {
+   "DESCN": 1581,
+   "DR": 218,
+   "EFIN": 1023,
+   "R": 56,
+   "S": 297,
+   "T": 322,
+   "TARNet": 115,
+   "X": 119,
+   "causal forest": 3
+  }
+ },
+ "dataset": "lazada",
+ "disagreements": [],
+ "files": {
+  "3 DESCN seed 0": "182d145f3cc1ae6eb214dd1aac8fb859607a2702910b649e912c1da25684779f",
+  "3 DESCN seed 1": "0cbe542ed2d4a4b8f11645d2235dd5a3588d13035cffdb63a48960c25191f387",
+  "3 DESCN seed 2": "df4eda23b302e4b786fef805d7e0774a0d0d006aceb06f41c7548352bc25e8b8",
+  "3 DESCN seed 3": "526209530b5875dc57b0bf03528ac0eb563db054be3a78fb7e250a4188537f82",
+  "3 DESCN seed 4": "ff652e5e88aa93ef1b8108a4c04d5d20b6ef75ef6de94c4296cc4efdd916e9ba",
+  "3 DR seed 0": "eb4d3887c665c922bef2d09b3c3651cb3f528b1ed6f67c451cfb7133c32c7dd7",
+  "3 DR seed 1": "43327be6162bf28db8670065a301ec795be7f7071cfbdfcaf96c14c0ff128d1f",
+  "3 DR seed 2": "05ed1998993ccce11cfe3ae7f252e7dfa1d1c6b4143c060aca849269a1e2f4ee",
+  "3 DR seed 3": "7e6aeac68c4017fdba255b33ae828643144b71eee2920985de2151a8401c2a51",
+  "3 DR seed 4": "057dd2b96f5217db12fe59532569027aeb0d2451fc751986c85eb55954a6ed32",
+  "3 EFIN seed 0": "0c9b86069b34bd20148b4412a3bebed11078419d98305ac0587d6bdb31775d5f",
+  "3 EFIN seed 1": "5627f3d9cb48b6053e176ed38f7ec06ac99b7bcdcf24e0859bfb76e7c44d7890",
+  "3 EFIN seed 2": "7dd30ce84cd814fbaa8e77960120a2d0d66a6645e318bc9c5fef18565e32d558",
+  "3 EFIN seed 3": "752013beb45c74ebc305516d796b39599e2cdc85a664f0915a36139f9831ae9a",
+  "3 EFIN seed 4": "41b578d77fd6859ae377165b925ff16253ee20d8a6983dd9ba90b49a77f9b648",
+  "3 R seed 0": "a8092822e3f074d008cfdecf72704b2642f96681aa6b0e31a8bfb34f8e69369d",
+  "3 R seed 1": "57e092daa9f49f4521ccac32671985e68c7a1a6afd27fbf6e75e437ff9bad118",
+  "3 R seed 2": "065d1fb769039a290796fc9a38363bbb506f3c1a555cdbab41e6dfc933384e38",
+  "3 R seed 3": "4b2693bcb9a2cd429d0b12a87f53c230c00c09320aaafdc53cb40717f7a45aac",
+  "3 R seed 4": "55a384434ccac9d53d0250c389f7f1b59795b20deba64be0c80d11efd0230b71",
+  "3 S seed 0": "d08508fe671eb29c401b7cac140edc5f619ea310b57e7729da57e48ed92c0f94",
+  "3 S seed 1": "0d97c9840b8aa158e297d78443c91ba5fea0af7f2a57752ab2555bf630f889c2",
+  "3 S seed 2": "9be3d0487619c0102fecd70d232043843e279e634510f1c0c95bd6eba67c041b",
+  "3 S seed 3": "bf141ee89c9da9513dbda438aad7a8878d700a43025d22f034bc42368fa5b242",
+  "3 S seed 4": "34b46822680ac84066bffc23d9c675a7bd8994afee349baee2aca14f9ebdc7ac",
+  "3 T seed 0": "cc62312b24d3497621425ad6770f8ecb0d2f568b4a7e2910ec31d6248b8845db",
+  "3 T seed 1": "d16f6dae05507781b9ed678c6e3d19385e8b80aadca5af06b72735627de85b3e",
+  "3 T seed 2": "668015dcd59767f0789beecef43e126756369a17b3bcd42b0b23271a24e48750",
+  "3 T seed 3": "2e282ac44f70d0262209fbe253998a6b66bbf008a85d3df64fe6eea614983f92",
+  "3 T seed 4": "eeeb186b968c7cebf1e6aa431113236cac6b9b1106f8dfaca61ee15c72c96b37",
+  "3 TARNet seed 0": "edcbfd082e6f9fc92cb60d44c41bf8c16d0685ae1d079fb52d4e86153d59acc2",
+  "3 TARNet seed 1": "2fde23d32fb53ce6dd1de5b167d411b49caa893321549f6026b4b9e588e572ae",
+  "3 TARNet seed 2": "8d73ee2dedabcbf246187d8cbd97f6254dcd213c44ce45b9bdae90aef17c8536",
+  "3 TARNet seed 3": "4a9b3dd1dafe9675f76d77966abd829b6ce79fb143d74d8ec30c14388e39c44a",
+  "3 TARNet seed 4": "01885641cbae5f02dd58f3ca65a8f22575f5cc6872d9cc44daa89461d3475d56",
+  "3 X seed 0": "336256f375804163c234843c4505a7b8fe6b751ddb56fd025cfd07ef612eb568",
+  "3 X seed 1": "ef9dbfa9fb87ffb0892d898af7dd56ed2b8921e92bfba846c30c754e862e9650",
+  "3 X seed 2": "0cfa0885104f79408f62fdaf96d5bc020dc34d2abf08dd3f6302a45aadf50490",
+  "3 X seed 3": "1c3c8fc87d32d5a2b5d30e7197a24e7db2833baa47973b77db76a8b01b23e2f7",
+  "3 X seed 4": "79d2a59d96d372451b004c5668517f7a2daddc4bd1f7d32c6cd5d31f972afa7b",
+  "3 causal forest seed 0": "0149d57b9c57bce0e74f47c4a11c1d1f528c872b11ebb3768aec389039abd1e2",
+  "3 causal forest seed 1": "938080b4e22bee028b78b81f905d06a16b65e7eea613434b237330f20a35be1f",
+  "3 causal forest seed 2": "5a58d0747504fe45b53882cc55d363e5532f6ff771ffcb1d6208cb232b9819dc",
+  "3 causal forest seed 3": "ef470b315cf4228282897c6545db0a5606092f64484e00d633bddcf0122a6ba0",
+  "3 causal forest seed 4": "6c536eb3cf85fc5f8d3eb439212352c039a1a1ce587353123139b0e84246dd3b",
+  "3 nuisances": "ff74ffd34536d04776e07ca07355332ef98b2b4c62cc3516b52feef9b13d160f",
+  "3 outcome models": "19b9dcc0cdc9f6ae033981346fedd5e007f915ac28d9e89f2e1f0e35272a77b9"
+ },
+ "records commit": "944628b8ea2293556b65a436cb78cb73a83ff8ef"
+}

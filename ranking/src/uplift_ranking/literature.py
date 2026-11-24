@@ -114,6 +114,7 @@ def matched(group):
 
 
 def share_below_matched(group, pair_mdd):
-    """Share of matched gaps below the MDD of the same pair of our models; `pair_mdd` maps frozenset pairs to MDDs."""
+    """Share of matched gaps below the MDD of the same pair of our models; `pair_mdd` maps frozenset pairs to MDDs.
+    None (JSON null) for a group without a matched pair, L3 (amendment 10)."""
     rows = matched(group)
-    return float(np.mean([abs(g) < pair_mdd[frozenset((a, b))] for a, b, g in rows])) if rows else float("nan")
+    return float(np.mean([abs(g) < pair_mdd[frozenset((a, b))] for a, b, g in rows])) if rows else None

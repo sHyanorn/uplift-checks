@@ -1,3 +1,4 @@
+import json
 import re
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -59,3 +60,9 @@ def test_matched_pairs():
     pair_mdd = {p: 0.01 for p in l1}
     expected = np.mean([abs(g) < 0.01 for _, _, g in lit.matched("L1 Criteo")])
     assert lit.share_below_matched("L1 Criteo", pair_mdd) == expected
+
+
+def test_a_group_without_a_matched_pair_writes_null():
+    """L3 has no matched pair; its share is null, so the results stay valid JSON (amendment 10)."""
+    assert lit.share_below_matched("L3", {}) is None
+    assert json.dumps({"s_L matched": lit.share_below_matched("L3", {})}, allow_nan=False) == '{"s_L matched": null}'

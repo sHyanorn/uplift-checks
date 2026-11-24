@@ -5646,7 +5646,7 @@
     "s_L": 0.8571428571428571,
     "s_L min": 0.5714285714285714,
     "s_L max": 1.0,
-    "s_L matched": NaN,
+    "s_L matched": null,
     "released size": {
      "MDD_L": 0.04367943313082955,
      "s_L": 1.0
@@ -6063,8 +6063,8 @@
  },
  "resources": {
   "peak memory GB": {
-   "process": 4.8,
-   "largest child": 2.532
+   "process": 4.685,
+   "largest child": 2.513
   },
   "cache GB": 0.367
  }
